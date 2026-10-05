@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# EVE-Netboot-Installer
+#   PXE boot server that offers LF Edge EVE-OS installers: the newest GitHub
+#   LTS releases (mirrored locally) plus your own installer ISOs.
+#
+#   All settings live in .env  ->  cp .env.example .env  and set SERVER_IP.
+#   Then:  docker compose up -d   (builds the image on first start, ~5 min)
+#
+#   Services (one image, three roles):
+#     sync  mirrors releases, imports local ISOs, writes the iPXE menu
+#     tftp  serves the iPXE binaries + boot.ipxe (UDP 69, host network)
+#     web   serves the menu, kernels, ISOs and a status page over HTTP
+# ---------------------------------------------------------------------------
+x-service: &service
+  image: ${EVE_IMAGE:-eve-netboot-installer:latest}
+  build:
+    context: ${EVE_SRC_DIR:-.}
+    args:
+      IPXE_VERSION: ${IPXE_VERSION:-v2.0.0}
+  init: true
+  restart: unless-stopped
+
+services:
+  sync:
+    <<: *service
+    command: sync
+    environment:
+      TZ: ${TZ:-UTC}
+      EVE_BASE_URL: http://${SERVER_IP:?set SERVER_IP in .env}:${HTTP_PORT:-8080}
+      EVE_LANGUAGE: ${EVE_LANGUAGE:-en}
+      EVE_MENU_MODE: ${EVE_MENU_MODE:-standalone}
+      EVE_MENU_TIMEOUT: ${EVE_MENU_TIMEOUT:-300}
+      EVE_ARCHES: ${EVE_ARCHES:-amd64}
+      EVE_FLAVOURS: ${EVE_FLAVOURS:-kvm}
+      EVE_LTS_LINES: ${EVE_LTS_LINES:-3}
+      EVE_SYNC_INTERVAL: ${EVE_SYNC_INTERVAL:-86400}
+      EVE_IMPORT_INTERVAL: ${EVE_IMPORT_INTERVAL:-60}
+      EVE_IMPORT_LABEL: ${EVE_IMPORT_LABEL:-}
+      EVE_GITHUB_REPO: ${EVE_GITHUB_REPO:-lf-edge/eve}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      EVE_DEFAULT_REBOOT: ${EVE_DEFAULT_REBOOT:-1}
+      EVE_DEFAULT_SOFT_SERIAL: ${EVE_DEFAULT_SOFT_SERIAL:-1}
+      EVE_DEFAULT_NUKE_ALL_DISKS: ${EVE_DEFAULT_NUKE_ALL_DISKS:-0}
+      EVE_DEFAULT_SERIAL: ${EVE_DEFAULT_SERIAL:-none}
+      EVE_DEFAULT_INSTALL_DISK: ${EVE_DEFAULT_INSTALL_DISK:-}
+      EVE_DEFAULT_PERSIST_DISK: ${EVE_DEFAULT_PERSIST_DISK:-}
+      EVE_DEFAULT_INSTALL_SERVER: ${EVE_DEFAULT_INSTALL_SERVER:-}
+      EVE_DEFAULT_EXTRA_ARGS: ${EVE_DEFAULT_EXTRA_ARGS:-}
+    volumes:
+      - ${DATA_DIR:-./data}/www:/assets
+      - ${DATA_DIR:-./data}/tftp:/tftp
+      - ${IMPORT_DIR:-./import}:/import:ro
+
+  tftp:
+    <<: *service
+    command: tftp
+    network_mode: host            # TFTP replies come from random UDP ports; no NAT
+    environment:
+      TFTP_LISTEN: ${TFTP_LISTEN:-0.0.0.0:69}
+      IPXE_ALIASES_X86_64: ${IPXE_ALIASES_X86_64:-}
+      IPXE_ALIASES_ARM64: ${IPXE_ALIASES_ARM64:-}
+    volumes:
+      - ${DATA_DIR:-./data}/tftp:/tftp
+
+  web:
+    <<: *service
+    command: web
+    ports:
+      - ${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8080}:80
+    volumes:
+      - ${DATA_DIR:-./data}/www:/srv/www:ro

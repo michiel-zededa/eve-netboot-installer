@@ -1,0 +1,16 @@
+#!ipxe
+# Embedded in the EVE-Netboot-Installer iPXE binaries (built into the image).
+# Deliberately generic: everything site specific lives in boot.ipxe, which
+# eve-sync generates and the TFTP service serves next to this binary.
+echo
+echo EVE-Netboot-Installer (iPXE ${version}, ${buildarch})
+dhcp || dhcp || goto failed
+isset ${next-server} || goto failed
+chain --autofree tftp://${next-server}/boot.ipxe || goto failed
+# the menu was left via "boot from local disk": back to the firmware boot order
+exit 1
+:failed
+echo
+echo Could not load tftp://${next-server}/boot.ipxe
+prompt --key s --timeout 15000 Press [s] for the iPXE shell, otherwise booting from local disk... && shell ||
+exit 1

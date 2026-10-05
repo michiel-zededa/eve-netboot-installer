@@ -1,0 +1,15 @@
+[Unit]
+Description=EVE-Netboot-Installer compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/eve-netboot start
+ExecStop=/usr/local/sbin/eve-netboot stop
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

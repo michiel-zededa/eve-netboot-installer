@@ -1,0 +1,7 @@
+# runtime data and local configuration
+/data/
+/import/
+.env
+__pycache__/
+*.pyc
+docker/ipxe-src.tar.gz
