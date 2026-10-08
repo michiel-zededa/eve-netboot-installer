@@ -210,6 +210,10 @@ class WriteMenusTest(unittest.TestCase):
         self.assertEqual(status["github_checked"], "2026-01-02 03:04")
 
 
+class StopLoop(Exception):
+    """Ends main() after a number of cycles (unlike SystemExit, which main() raises itself)."""
+
+
 class MainLoopTest(unittest.TestCase):
 
     def run_loop(self, interval, cycles=3):
@@ -218,13 +222,14 @@ class MainLoopTest(unittest.TestCase):
         def sleep(_):
             sleeps.append(1)
             if len(sleeps) >= cycles:
-                raise SystemExit
+                raise StopLoop
         with mock.patch.multiple(eve_sync, SYNC_INTERVAL=interval, sync_local=mock.DEFAULT,
                                  sync_github=mock.DEFAULT, write_menus=mock.DEFAULT,
                                  log=mock.DEFAULT) as m, \
                 mock.patch.object(eve_sync.time, "sleep", sleep), \
+                mock.patch.object(eve_sync.shutil, "which", return_value="/usr/bin/bsdtar"), \
                 mock.patch.object(sys, "argv", ["eve_sync.py"]):
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(StopLoop):
                 eve_sync.main()
         return m
 
