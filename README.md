@@ -133,17 +133,18 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
 The fastest way, with the prebuilt image. **[docs/deployment.md](docs/deployment.md)** is the full step-by-step guide, with checks after every step and example settings.
 
+Every [release](https://github.com/michiel-zededa/eve-netboot-installer/releases/latest) has `compose.yaml` and `env.example` (all settings, with `EVE_IMAGE` set to that release's image) attached:
+
 ```bash
 mkdir -p ~/eve-netboot && cd ~/eve-netboot
-curl -fsSLO https://raw.githubusercontent.com/michiel-zededa/eve-netboot-installer/main/compose.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/michiel-zededa/eve-netboot-installer/main/.env.example
+curl -fsSLO https://github.com/michiel-zededa/eve-netboot-installer/releases/latest/download/compose.yaml
+curl -fsSL -o .env https://github.com/michiel-zededa/eve-netboot-installer/releases/latest/download/env.example
 ```
 
-Edit `.env` and set these two lines:
+Edit `.env` and set one line:
 
 ```sh
 SERVER_IP=192.168.1.10        # this host's LAN address, as the PXE clients see it
-EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest
 ```
 
 Start the stack:

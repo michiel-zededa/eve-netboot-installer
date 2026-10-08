@@ -56,8 +56,11 @@ them, and you can delete them.
 
 ```sh
 SERVER_IP=192.168.1.10                                           # <- answer 1
-EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest
+EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
 ```
+
+The `env.example` of a release already has `EVE_IMAGE` set to that release's
+image; `:latest` instead follows every change on the main branch.
 
 This mirrors the 3 newest EVE-OS LTS lines for amd64 (`kvm`), serves HTTP on
 port 8080 and shows the menu in English.
@@ -66,7 +69,7 @@ port 8080 and shows the menu in English.
 
 ```sh
 SERVER_IP=192.168.1.10                                           # <- answer 1
-EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest
+EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
 
 # where your own installer ISOs are (for example controller-specific builds)
 IMPORT_DIR=/srv/iso/eve                                          # <- your folder
@@ -122,8 +125,8 @@ Chain it from your menu with `chain http://192.168.1.10:8080/eve/eve.ipxe`.
 
 | | Prebuilt image (recommended) | Own build |
 |---|---|---|
-| Setting | `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest` | leave `EVE_IMAGE` empty |
-| Needs | `compose.yaml` and `.env` | a clone of this repository |
+| Setting | `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1` (already set in a release's `env.example`) | leave `EVE_IMAGE` empty |
+| Needs | `compose.yaml` and `.env`, both attached to every release | a clone of this repository |
 | First start | about 1 minute | about 5 minutes (iPXE is compiled) |
 | Pin a version | `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.0.0` | `git checkout v1.0.0` |
 
@@ -135,19 +138,26 @@ Fixed versions are listed on the [releases page](https://github.com/michiel-zede
 
 ### 3A. Get the files
 
-**With the prebuilt image**, two files are enough:
+**With the prebuilt image**, two files are enough. Every
+[release](https://github.com/michiel-zededa/eve-netboot-installer/releases)
+has them attached: `compose.yaml` and `env.example` (all settings, with
+`EVE_IMAGE` set to that release). These commands fetch them from the newest
+release; save `env.example` as `.env`:
 
 ```bash
 mkdir -p ~/eve-netboot && cd ~/eve-netboot
 ```
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/michiel-zededa/eve-netboot-installer/main/compose.yaml
+curl -fsSLO https://github.com/michiel-zededa/eve-netboot-installer/releases/latest/download/compose.yaml
 ```
 
 ```bash
-curl -fsSL -o .env https://raw.githubusercontent.com/michiel-zededa/eve-netboot-installer/main/.env.example
+curl -fsSL -o .env https://github.com/michiel-zededa/eve-netboot-installer/releases/latest/download/env.example
 ```
+
+For a specific version, replace `latest/download` with `download/v1.2.1`
+(or another tag).
 
 **For your own build**, clone the repository instead:
 
@@ -239,7 +249,8 @@ Create two folders on the NAS, for example in a shared folder:
 ### 4B. Create the stack
 
 1. **Create a new stack** in the web UI, for example named `eve-netboot`.
-2. **Stack file:** paste the contents of [compose.yaml](../compose.yaml) unchanged.
+2. **Stack file:** paste the contents of `compose.yaml` from the
+   [newest release](https://github.com/michiel-zededa/eve-netboot-installer/releases/latest) unchanged.
 3. **Environment:** paste the block below and change the values under each
    comment. Use **absolute paths**: relative paths would resolve against the
    UI's own stack folder.
@@ -247,7 +258,7 @@ Create two folders on the NAS, for example in a shared folder:
    ```sh
    # the NAS address, as the PXE clients see it
    SERVER_IP=192.168.1.10
-   EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest
+   EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
    # data folder and import folder from step 3B
    DATA_DIR=/srv/data/eve-netboot
    IMPORT_DIR=/srv/iso/eve
