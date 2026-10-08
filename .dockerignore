@@ -8,3 +8,4 @@ docs
 *.md
 tests
 ruff.toml
+vm

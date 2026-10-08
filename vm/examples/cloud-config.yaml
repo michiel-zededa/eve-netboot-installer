@@ -1,0 +1,22 @@
+#cloud-config
+# EVE-Netboot-Installer VM - settings as a #cloud-config
+#
+# The "eve_netboot:" section takes the same settings as settings.txt. The rest
+# is standard cloud-init and applies to the user "admin".
+
+eve_netboot:
+  SERVER_IP: auto
+  NET_MODE: dhcp
+  EVE_LANGUAGE: en
+  EVE_ARCHES: amd64 arm64
+  EVE_FLAVOURS: kvm
+  EVE_LTS_LINES: 3
+  EVE_DEFAULT_INSTALL_SERVER: zedcloud.zededa.net
+  SMB_IMPORT_SHARE: no
+
+# password for "admin" (console, menu, SSH)
+password: Change-Me-Please-1
+chpasswd:
+  expire: false
+ssh_authorized_keys:
+  - ssh-ed25519 AAAA-REPLACE-WITH-YOUR-PUBLIC-KEY you@laptop

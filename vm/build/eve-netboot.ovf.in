@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EVE-Netboot-Installer VM appliance, filled in by build.sh -->
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1"
+          xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1"
+          xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData"
+          xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData"
+          xmlns:vmw="http://www.vmware.com/schema/ovf"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <References>
+    <File ovf:id="file1" ovf:href="@@DISK@@" ovf:size="@@SIZE@@"/>
+  </References>
+  <DiskSection>
+    <Info>Virtual disk</Info>
+    <Disk ovf:diskId="vmdisk1" ovf:fileRef="file1" ovf:capacity="@@CAPACITY@@" ovf:capacityAllocationUnits="byte"
+          ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized"/>
+  </DiskSection>
+  <NetworkSection>
+    <Info>The network the PXE clients boot from</Info>
+    <Network ovf:name="PXE LAN">
+      <Description>Connect to the port group (layer 2 network) of the machines that network boot</Description>
+    </Network>
+  </NetworkSection>
+  <VirtualSystem ovf:id="@@NAME@@">
+    <Info>EVE-Netboot-Installer VM appliance</Info>
+    <Name>eve-netboot</Name>
+    <AnnotationSection>
+      <Info>Description</Info>
+      <Annotation>EVE-Netboot-Installer @@VERSION@@: PXE boot server for LF Edge EVE-OS installers. Open the VM console after power on to set it up. https://github.com/michiel-zededa/eve-netboot-installer</Annotation>
+    </AnnotationSection>
+    <ProductSection>
+      <Info>Product</Info>
+      <Product>EVE-Netboot-Installer</Product>
+      <Version>@@VERSION@@</Version>
+      <ProductUrl>https://github.com/michiel-zededa/eve-netboot-installer</ProductUrl>
+    </ProductSection>
+    <OperatingSystemSection ovf:id="96" vmw:osType="debian11_64Guest">
+      <Info>Debian GNU/Linux 13 (64-bit)</Info>
+    </OperatingSystemSection>
+    <VirtualHardwareSection>
+      <Info>2 vCPU, 2 GB RAM, one disk, one network adapter</Info>
+      <System>
+        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
+        <vssd:InstanceID>0</vssd:InstanceID>
+        <vssd:VirtualSystemIdentifier>eve-netboot</vssd:VirtualSystemIdentifier>
+        <vssd:VirtualSystemType>vmx-14</vssd:VirtualSystemType>
+      </System>
+      <Item>
+        <rasd:AllocationUnits>hertz * 10^6</rasd:AllocationUnits>
+        <rasd:Description>Number of virtual CPUs</rasd:Description>
+        <rasd:ElementName>2 virtual CPUs</rasd:ElementName>
+        <rasd:InstanceID>1</rasd:InstanceID>
+        <rasd:ResourceType>3</rasd:ResourceType>
+        <rasd:VirtualQuantity>2</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:AllocationUnits>byte * 2^20</rasd:AllocationUnits>
+        <rasd:Description>Memory size</rasd:Description>
+        <rasd:ElementName>2048 MB of memory</rasd:ElementName>
+        <rasd:InstanceID>2</rasd:InstanceID>
+        <rasd:ResourceType>4</rasd:ResourceType>
+        <rasd:VirtualQuantity>2048</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Description>SCSI controller</rasd:Description>
+        <rasd:ElementName>SCSI controller 0</rasd:ElementName>
+        <rasd:InstanceID>3</rasd:InstanceID>
+        <rasd:ResourceSubType>VirtualSCSI</rasd:ResourceSubType>
+        <rasd:ResourceType>6</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:ElementName>Hard disk 1</rasd:ElementName>
+        <rasd:HostResource>ovf:/disk/vmdisk1</rasd:HostResource>
+        <rasd:InstanceID>4</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>7</rasd:AddressOnParent>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Connection>PXE LAN</rasd:Connection>
+        <rasd:Description>VmxNet3 ethernet adapter on "PXE LAN"</rasd:Description>
+        <rasd:ElementName>Network adapter 1</rasd:ElementName>
+        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:ResourceSubType>VmxNet3</rasd:ResourceSubType>
+        <rasd:ResourceType>10</rasd:ResourceType>
+      </Item>
+      <Item ovf:required="false">
+        <rasd:AutomaticAllocation>false</rasd:AutomaticAllocation>
+        <rasd:ElementName>Video card</rasd:ElementName>
+        <rasd:InstanceID>6</rasd:InstanceID>
+        <rasd:ResourceType>24</rasd:ResourceType>
+      </Item>
+      <vmw:Config ovf:required="false" vmw:key="firmware" vmw:value="bios"/>
+      <vmw:Config ovf:required="false" vmw:key="tools.syncTimeWithHost" vmw:value="true"/>
+    </VirtualHardwareSection>
+  </VirtualSystem>
+</Envelope>

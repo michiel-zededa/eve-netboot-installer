@@ -19,10 +19,13 @@ jobs:
         with:
           python-version: "3.13"   # same as the image
       - name: Unit tests
-        run: python -m unittest discover -s tests -v
+        # PyYAML: the appliance reads #cloud-config user-data with it (python3-yaml in the VM)
+        run: pip install pyyaml && python -m unittest discover -s tests -v
       - name: Lint Python
-        run: pip install ruff==0.16.10 && ruff check app tests deploy
+        run: pip install ruff==0.16.10 && ruff check app tests vm
       - name: Lint shell scripts
-        run: shellcheck --severity=warning docker/entrypoint.sh docker/build-ipxe.sh deploy/debian-vm/files/eve-netboot
-      - name: user-data.yaml is up to date with deploy/debian-vm/files
-        run: python deploy/debian-vm/build-user-data.py && git diff --exit-code deploy/debian-vm/user-data.yaml
+        run: >-
+          shellcheck --severity=warning docker/entrypoint.sh docker/build-ipxe.sh
+          vm/build/build.sh vm/build/provision.sh vm/rootfs/etc/profile.d/eve-netboot.sh
+      - name: OVF descriptor is valid XML
+        run: python -c "import xml.dom.minidom as m; m.parse('vm/build/eve-netboot.ovf.in')"

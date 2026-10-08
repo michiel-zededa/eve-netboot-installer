@@ -1,0 +1,1336 @@
+#!/usr/bin/env python3
+"""
+eve-netboot -- the EVE-Netboot-Installer VM appliance
+=====================================================
+
+One command for everything the appliance does:
+
+  eve-netboot boot           run at every boot (eve-netboot-setup.service):
+                             grow the disk, apply settings passed in through
+                             cloud-init, start the stack
+  eve-netboot console        the screen on tty1 (eve-netboot-console.service):
+                             setup wizard until the appliance is set up, then
+                             a status screen with a login to the menu
+  eve-netboot menu           the settings menu (admin, after login)
+  eve-netboot status         status as text
+  eve-netboot apply          apply /etc/eve-netboot/settings.env
+  eve-netboot logs [svc]     follow the logs of the stack
+  eve-netboot sync           check GitHub for new EVE-OS releases now
+  eve-netboot update-system  Debian updates (apt), with a check afterwards
+  eve-netboot update-app     newest EVE-Netboot-Installer release, with rollback
+  eve-netboot export         print the settings as KEY=VALUE text
+
+Settings live in /etc/eve-netboot/settings.env (KEY=VALUE). Settings passed in
+through cloud-init (plain KEY=VALUE user-data, or an "eve_netboot:" mapping in
+a #cloud-config) are merged into that file whenever the user-data changes.
+"""
+
+import ctypes
+import datetime
+import fcntl
+import hashlib
+import hmac
+import ipaddress
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+# --------------------------------------------------------------------------
+# paths and constants
+# --------------------------------------------------------------------------
+ETC = os.environ.get("EVE_NETBOOT_ETC", "/etc/eve-netboot")
+SETTINGS = os.path.join(ETC, "settings.env")
+CONFIGURED = os.path.join(ETC, ".configured")
+KEYS_DIR = os.path.join(ETC, "authorized_keys")
+LIB = "/usr/local/lib/eve-netboot"
+STATE = "/var/lib/eve-netboot"
+STACK = "/opt/eve-netboot"
+DATA = "/srv/eve-netboot"
+IMPORT = os.path.join(DATA, "import")
+WWW = os.path.join(DATA, "www")
+LOG = "/var/log/eve-netboot.log"
+LOCK = "/run/eve-netboot.lock"
+BOOT_DONE = "/run/eve-netboot.boot-done"   # written when "eve-netboot boot" has finished
+USERDATA = "/var/lib/cloud/instance/user-data.txt"
+NETWORKD = "/etc/systemd/network"
+NET_STATIC = os.path.join(NETWORKD, "10-eve-netboot-static.network")
+NET_DHCP = os.path.join(NETWORKD, "20-eve-netboot.network")
+SSHD_CONF = "/etc/ssh/sshd_config.d/10-eve-netboot.conf"
+SMB_CONF = "/etc/samba/smb.conf"
+ADMIN = "admin"
+REPO = "michiel-zededa/eve-netboot-installer"
+IMAGE_REPO = f"ghcr.io/{REPO}"
+LANGUAGES = [("en", "English"), ("de", "Deutsch"), ("fr", "Francais"), ("es", "Espanol"),
+             ("pt", "Portugues"), ("nl", "Nederlands"), ("da", "Dansk"), ("no", "Norsk")]
+SERIALS = ["none", "ttyS0", "ttyS1", "ttyAMA0"]
+
+# settings that configure the VM itself; everything else goes to the stack's .env
+VM_KEYS = {"HOSTNAME", "NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS",
+           "ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "ADMIN_SSH_KEYS", "SSH_PASSWORD_LOGIN",
+           "SMB_IMPORT_SHARE", "SMB_PASSWORD"}
+# applied once and never stored
+CONSUMED = {"ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "SMB_PASSWORD"}
+# not in an export (secrets)
+NOT_EXPORTED = CONSUMED | {"EVE_GITHUB_TOKEN", "GITHUB_TOKEN"}
+# fixed by the appliance; ignored when set
+FIXED = {"DATA_DIR", "IMPORT_DIR", "EVE_SRC_DIR", "SERVER_IP_DETECTED"}
+
+DEFAULTS = {
+    "HOSTNAME": "eve-netboot",
+    "NET_MODE": "dhcp",
+    "SSH_PASSWORD_LOGIN": "yes",
+    "SMB_IMPORT_SHARE": "no",
+    "SERVER_IP": "auto",
+    "HTTP_PORT": "8080",
+    "TZ": "UTC",
+    "EVE_LANGUAGE": "en",
+    "EVE_ARCHES": "amd64",
+    "EVE_FLAVOURS": "kvm",
+    "EVE_LTS_LINES": "3",
+    "EVE_IMPORT_LABEL": "import share",
+}
+
+KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+# --------------------------------------------------------------------------
+# settings: parse, merge, validate, render (pure functions, unit tested)
+# --------------------------------------------------------------------------
+def parse_env(text):
+    """KEY=VALUE lines -> dict. Same rules as docker compose's .env:
+    full-line comments, optional quotes, ' #...' after an unquoted value is a comment."""
+    out = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not KEY_RE.match(key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+        out[key] = value
+    return out
+
+
+def parse_user_data(text):
+    """Settings from cloud-init user-data, or None if it carries none.
+
+    Accepted: plain KEY=VALUE lines, or a #cloud-config with an
+    "eve_netboot:" mapping. Scripts, MIME archives etc. are not ours."""
+    if not text or not text.strip():
+        return None
+    first = text.lstrip().splitlines()[0].strip()
+    if first.startswith("#cloud-config"):
+        try:
+            import yaml  # python3-yaml ships with cloud-init
+        except ImportError:
+            return None
+        try:
+            doc = yaml.safe_load(text) or {}
+        except yaml.YAMLError:
+            return None
+        section = doc.get("eve_netboot") if isinstance(doc, dict) else None
+        if not isinstance(section, dict):
+            return None
+        out = {}
+        for k, v in section.items():
+            k = str(k).strip().upper()
+            if KEY_RE.match(k) and v is not None:
+                out[k] = ("yes" if v else "no") if isinstance(v, bool) else str(v).strip()
+        return out or None
+    if first.startswith("#!") or first.lower().startswith("content-type") or first.startswith("#include"):
+        return None
+    return parse_env(text) or None
+
+
+def merge(current, incoming):
+    """incoming overrides current; keys in FIXED are dropped."""
+    out = dict(current)
+    for k, v in incoming.items():
+        if k not in FIXED:
+            out[k] = v
+    return out
+
+
+def get(settings, key):
+    v = settings.get(key, "")
+    return v if v != "" else DEFAULTS.get(key, "")
+
+
+def validate(s):
+    """List of human-readable problems (empty = fine)."""
+    errors = []
+    mode = get(s, "NET_MODE")
+    if mode not in ("dhcp", "static"):
+        errors.append("NET_MODE must be dhcp or static")
+    if mode == "static":
+        try:
+            iface = ipaddress.ip_interface(get(s, "NET_ADDRESS"))
+            if iface.version != 4 or iface.network.prefixlen == 32:
+                raise ValueError
+        except ValueError:
+            errors.append("NET_ADDRESS must be an IPv4 address with prefix, e.g. 192.168.1.20/24")
+            iface = None
+        gw = get(s, "NET_GATEWAY")
+        if gw:
+            try:
+                g = ipaddress.ip_address(gw)
+                if iface and g not in iface.network:
+                    errors.append(f"NET_GATEWAY {gw} is not in {iface.network}")
+            except ValueError:
+                errors.append("NET_GATEWAY must be an IPv4 address")
+        for d in get(s, "NET_DNS").replace(",", " ").split():
+            try:
+                ipaddress.ip_address(d)
+            except ValueError:
+                errors.append(f"NET_DNS: {d} is not an IP address")
+    sip = get(s, "SERVER_IP")
+    if sip != "auto":
+        try:
+            ipaddress.IPv4Address(sip)
+        except ValueError:
+            errors.append("SERVER_IP must be auto or an IPv4 address")
+    port = get(s, "HTTP_PORT")
+    if not port.isdigit() or not 1 <= int(port) <= 65535 or int(port) == 69:
+        errors.append("HTTP_PORT must be a TCP port number")
+    if not re.fullmatch(r"[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", get(s, "HOSTNAME")):
+        errors.append("HOSTNAME may only contain letters, digits and '-'")
+    for k in ("SSH_PASSWORD_LOGIN", "SMB_IMPORT_SHARE"):
+        if get(s, k) not in ("yes", "no"):
+            errors.append(f"{k} must be yes or no")
+    if get(s, "EVE_LANGUAGE") not in dict(LANGUAGES):
+        errors.append("EVE_LANGUAGE must be one of " + " ".join(dict(LANGUAGES)))
+    if not set(get(s, "EVE_ARCHES").split()) <= {"amd64", "arm64"} or not get(s, "EVE_ARCHES").split():
+        errors.append("EVE_ARCHES must be amd64, arm64 or both")
+    if not set(get(s, "EVE_FLAVOURS").split()) <= {"kvm", "k"} or not get(s, "EVE_FLAVOURS").split():
+        errors.append("EVE_FLAVOURS must be kvm, k or both")
+    if not get(s, "EVE_LTS_LINES").isdigit():
+        errors.append("EVE_LTS_LINES must be a number")
+    serial = s.get("EVE_DEFAULT_SERIAL", "")
+    if serial and serial not in SERIALS:
+        errors.append("EVE_DEFAULT_SERIAL must be one of " + " ".join(SERIALS))
+    for k, v in s.items():
+        if k not in VM_KEYS and "'" in v:
+            errors.append(f"{k}: the character ' is not allowed")
+        if "\n" in v:
+            errors.append(f"{k}: must be a single line")
+    return errors
+
+
+def render_settings(s):
+    """settings dict -> settings.env text (consumed secrets are never written)."""
+    lines = ["# EVE-Netboot-Installer appliance settings",
+             "# Change them with: eve-netboot menu   (or edit and run: eve-netboot apply)",
+             "# All application settings: https://github.com/" + REPO + "/blob/main/.env.example",
+             ""]
+    for k in sorted(s):
+        if k not in CONSUMED:
+            lines.append(f"{k}={s[k]}")
+    return "\n".join(lines) + "\n"
+
+
+def render_export(s):
+    lines = ["# EVE-Netboot-Installer settings export, " + datetime.date.today().isoformat(),
+             "# Use it as the cloud-init user-data of a new VM, or import it in the setup menu.",
+             "# Passwords and tokens are not included."]
+    for k in sorted(s):
+        if k not in NOT_EXPORTED:
+            lines.append(f"{k}={s[k]}")
+    return "\n".join(lines) + "\n"
+
+
+def render_stack_env(s, server_ip, image):
+    """The stack's .env: application settings plus the appliance's fixed values."""
+    app = {k: v for k, v in s.items() if k not in VM_KEYS and k not in FIXED and v != ""}
+    for k in ("HTTP_PORT", "TZ", "EVE_LANGUAGE", "EVE_ARCHES", "EVE_FLAVOURS", "EVE_LTS_LINES",
+              "EVE_IMPORT_LABEL"):
+        app.setdefault(k, DEFAULTS[k])
+    app.update({"SERVER_IP": server_ip, "DATA_DIR": DATA, "IMPORT_DIR": IMPORT, "EVE_IMAGE": image})
+    lines = ["# generated by eve-netboot from " + SETTINGS + " - do not edit"]
+    lines += [f"{k}='{app[k]}'" for k in sorted(app)]
+    return "\n".join(lines) + "\n"
+
+
+def render_networkd(s):
+    """(static file content or None, dhcp file content)."""
+    dhcp = ("# managed by eve-netboot - change with: eve-netboot menu\n"
+            "[Match]\nName=en* eth*\n\n[Network]\nDHCP=yes\n\n"
+            "[DHCPv4]\n# the MAC address identifies the VM, so DHCP reservations by MAC work\n"
+            "ClientIdentifier=mac\n")
+    if get(s, "NET_MODE") != "static":
+        return None, dhcp
+    lines = ["# managed by eve-netboot - change with: eve-netboot menu", "[Match]",
+             f"Name={get(s, 'NET_INTERFACE') or 'en* eth*'}", "", "[Network]",
+             f"Address={get(s, 'NET_ADDRESS')}"]
+    if get(s, "NET_GATEWAY"):
+        lines.append(f"Gateway={get(s, 'NET_GATEWAY')}")
+    for d in get(s, "NET_DNS").replace(",", " ").split():
+        lines.append(f"DNS={d}")
+    return "\n".join(lines) + "\n", dhcp
+
+
+def render_smb_conf():
+    return f"""# managed by eve-netboot - change with: eve-netboot menu
+[global]
+   workgroup = WORKGROUP
+   server role = standalone server
+   map to guest = never
+   load printers = no
+   printing = bsd
+   printcap name = /dev/null
+   disable spoolss = yes
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+
+[eve-import]
+   comment = EVE installer ISOs for EVE-Netboot-Installer
+   path = {IMPORT}
+   valid users = {ADMIN}
+   read only = no
+   create mask = 0644
+   directory mask = 0755
+"""
+
+
+def userdata_digest(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# system helpers
+# --------------------------------------------------------------------------
+def log(msg):
+    line = f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
+    print(line, flush=True)
+    try:
+        with open(LOG, "a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def run(cmd, check=True, quiet=False, **kw):
+    p = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    if not quiet and (p.stdout.strip() or p.stderr.strip()):
+        with open(LOG, "a") as f:
+            f.write(f"$ {' '.join(cmd)}\n{p.stdout}{p.stderr}")
+    if check and p.returncode != 0:
+        raise RuntimeError(f"{' '.join(cmd)} failed: {(p.stderr or p.stdout).strip()[-300:]}")
+    return p
+
+
+def read(path, default=""):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except (FileNotFoundError, PermissionError):
+        return default
+
+
+def write(path, content, mode=0o644):
+    """Write atomically; returns True when the content changed."""
+    if read(path, None) == content:
+        return False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+    return True
+
+
+def load_settings():
+    return parse_env(read(SETTINGS))
+
+
+def save_settings(s):
+    write(SETTINGS, render_settings(s), 0o600)
+
+
+def is_configured():
+    return os.path.exists(CONFIGURED)
+
+
+def version():
+    return read(os.path.join(LIB, "VERSION"), "dev").strip()
+
+
+def current_image(s):
+    return get(s, "EVE_IMAGE") or read(os.path.join(STATE, "image")).strip() or f"{IMAGE_REPO}:{version()}"
+
+
+def ipv4_addresses():
+    """[(interface, 'a.b.c.d/nn')] of the VM's own network interfaces."""
+    p = run(["ip", "-4", "-o", "addr", "show", "scope", "global"], check=False, quiet=True)
+    out = []
+    for line in p.stdout.splitlines():
+        parts = line.split()
+        if len(parts) > 3 and re.match(r"^(en|eth)", parts[1]):
+            out.append((parts[1], parts[3]))
+    return out
+
+
+def primary_ip():
+    p = run(["ip", "-4", "route", "get", "1.1.1.1"], check=False, quiet=True)
+    m = re.search(r"\bsrc (\S+)", p.stdout)
+    if m:
+        return m.group(1)
+    addrs = ipv4_addresses()   # a PXE LAN without a default gateway
+    return addrs[0][1].split("/")[0] if addrs else ""
+
+
+def primary_interface():
+    p = run(["ip", "-4", "route", "get", "1.1.1.1"], check=False, quiet=True)
+    m = re.search(r"\bdev (\S+)", p.stdout)
+    if m:
+        return m.group(1)
+    addrs = ipv4_addresses()
+    return addrs[0][0] if addrs else ""
+
+
+def wait_for_ip(seconds=60):
+    end = time.time() + seconds
+    while time.time() < end:
+        ip = primary_ip()
+        if ip:
+            return ip
+        time.sleep(2)
+    return ""
+
+
+def check_password(user, password):
+    """Check a password against /etc/shadow with the system's crypt() (yescrypt etc.)."""
+    entry = next((line.split(":") for line in read("/etc/shadow").splitlines()
+                  if line.startswith(user + ":")), None)
+    if not entry or len(entry) < 2 or not entry[1] or entry[1][0] in "!*":
+        return False
+    try:
+        libcrypt = ctypes.CDLL("libcrypt.so.1")
+    except OSError:
+        return False
+    libcrypt.crypt.restype = ctypes.c_char_p
+    libcrypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    out = libcrypt.crypt(password.encode(), entry[1].encode())
+    return out is not None and hmac.compare_digest(out.decode(), entry[1])
+
+
+def admin_has_password():
+    p = run(["passwd", "-S", ADMIN], check=False, quiet=True)
+    return len(p.stdout.split()) > 1 and p.stdout.split()[1] == "P"
+
+
+def compose(*args, check=True):
+    return run(["docker", "compose", "--project-directory", STACK, "-f", os.path.join(STACK, "compose.yaml"),
+                "--env-file", os.path.join(STACK, ".env"), "-p", "eve-netboot", *args], check=check)
+
+
+def stack_state():
+    """{service: state} of the compose stack."""
+    p = compose("ps", "-a", "--format", "json", check=False)
+    states = {}
+    for line in p.stdout.splitlines():
+        try:
+            items = json.loads(line)
+        except ValueError:
+            continue
+        for c in items if isinstance(items, list) else [items]:
+            states[c.get("Service", "?")] = c.get("State", "?")
+    return states
+
+
+def http_ok(port, path="/", timeout=5):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as r:
+            return r.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def healthy(s, seconds=90):
+    """All three services running and the status page answering."""
+    end = time.time() + seconds
+    while time.time() < end:
+        st = stack_state()
+        if all(st.get(x) == "running" for x in ("sync", "tftp", "web")) and http_ok(get(s, "HTTP_PORT")):
+            return True
+        time.sleep(3)
+    return False
+
+
+class Lock:
+    def __enter__(self):
+        self.f = open(LOCK, "w")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
+
+
+# --------------------------------------------------------------------------
+# apply
+# --------------------------------------------------------------------------
+def apply_network(s):
+    static, dhcp = render_networkd(s)
+    changed = write(NET_DHCP, dhcp)
+    if static:
+        changed |= write(NET_STATIC, static)
+    elif os.path.exists(NET_STATIC):
+        os.remove(NET_STATIC)
+        changed = True
+    if changed:
+        log("network configuration changed, reconfiguring")
+        run(["networkctl", "reload"], check=False)
+        links = [n for n in os.listdir("/sys/class/net") if re.match(r"^(en|eth)", n)]
+        if links:
+            run(["networkctl", "reconfigure", *links], check=False)
+        time.sleep(3)
+
+
+def apply_identity(s):
+    host = get(s, "HOSTNAME")
+    if read("/etc/hostname").strip() != host:
+        run(["hostnamectl", "set-hostname", host], check=False)
+    hosts = read("/etc/hosts")
+    line = f"127.0.1.1\t{host}"
+    if line not in hosts:
+        hosts = re.sub(r"(?m)^127\.0\.1\.1\s.*\n?", "", hosts)
+        write("/etc/hosts", hosts.rstrip("\n") + "\n" + line + "\n")
+    tz = get(s, "TZ")
+    if os.path.exists(os.path.join("/usr/share/zoneinfo", tz)):
+        run(["timedatectl", "set-timezone", tz], check=False)
+
+
+def apply_access(s):
+    if s.get("ADMIN_PASSWORD"):
+        run(["chpasswd"], input=f"{ADMIN}:{s['ADMIN_PASSWORD']}\n")
+        log("admin password set")
+    elif s.get("ADMIN_PASSWORD_HASH"):
+        run(["usermod", "-p", s["ADMIN_PASSWORD_HASH"], ADMIN])
+        log("admin password set (hash)")
+    keys = [k.strip() for k in get(s, "ADMIN_SSH_KEYS").split(";") if k.strip()]
+    write(os.path.join(KEYS_DIR, ADMIN), "".join(k + "\n" for k in keys))
+    conf = ("# managed by eve-netboot\n"
+            f"PasswordAuthentication {get(s, 'SSH_PASSWORD_LOGIN')}\n"
+            f"AuthorizedKeysFile .ssh/authorized_keys {KEYS_DIR}/%u\n")
+    if write(SSHD_CONF, conf):
+        run(["systemctl", "reload-or-restart", "ssh"], check=False)
+
+
+def apply_smb(s):
+    if get(s, "SMB_IMPORT_SHARE") == "yes":
+        write(SMB_CONF, render_smb_conf())
+        if s.get("SMB_PASSWORD"):
+            run(["smbpasswd", "-s", "-a", ADMIN], input=f"{s['SMB_PASSWORD']}\n{s['SMB_PASSWORD']}\n")
+            log("SMB password set")
+        run(["systemctl", "enable", "--now", "smbd"], check=False)
+        run(["systemctl", "restart", "smbd"], check=False)
+    else:
+        run(["systemctl", "disable", "--now", "smbd"], check=False, quiet=True)
+
+
+def apply_stack(s, wait=True):
+    ip = primary_ip() if wait is False else wait_for_ip()
+    server_ip = ip if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP")
+    if not server_ip:
+        raise RuntimeError("no IPv4 address yet - check the network settings")
+    for d in (os.path.join(DATA, "www"), os.path.join(DATA, "tftp"), IMPORT):
+        os.makedirs(d, exist_ok=True)
+    shutil.chown(IMPORT, ADMIN, ADMIN)
+    write(os.path.join(STACK, ".env"), render_stack_env(s, server_ip, current_image(s)), 0o600)
+    compose("up", "-d", "--no-build", "--pull", "missing", "--remove-orphans")
+    log(f"stack started (SERVER_IP={server_ip})")
+
+
+def apply(s, stack=True):
+    """Apply settings dict s to the system; consumed secrets are applied and dropped."""
+    errors = validate(s)
+    if errors:
+        raise ValueError("; ".join(errors))
+    with Lock():
+        apply_identity(s)
+        apply_network(s)
+        apply_access(s)
+        apply_smb(s)
+        clean = {k: v for k, v in s.items() if k not in CONSUMED}
+        save_settings(clean)
+        write(CONFIGURED, datetime.datetime.now().isoformat() + "\n")
+        if stack:
+            apply_stack(clean)
+    return clean
+
+
+def grow_disk():
+    """Use all of the disk the hypervisor gives us (cheap no-op when already done)."""
+    source = run(["findmnt", "-n", "-o", "SOURCE", "/"], check=False, quiet=True).stdout.strip()
+    name = os.path.basename(source)
+    disk = run(["lsblk", "-n", "-o", "PKNAME", source], check=False, quiet=True).stdout.strip()
+    part = read(f"/sys/class/block/{name}/partition").strip()
+    if not disk or not part:
+        return
+    g = run(["growpart", f"/dev/{disk}", part], check=False, quiet=True)
+    if g.returncode == 0:
+        run(["resize2fs", source], check=False)
+        log(f"root file system grown to the full disk (/dev/{disk})")
+
+
+def cloud_init_settings():
+    """Settings from cloud-init user-data when it changed since last time, else None."""
+    text = read(USERDATA, "")
+    if not text.strip():
+        return None
+    digest = userdata_digest(text)
+    stamp = os.path.join(STATE, "userdata.sha256")
+    if read(stamp).strip() == digest:
+        return None
+    found = parse_user_data(text)
+    write(stamp, digest + "\n", 0o600)
+    return found
+
+
+# --------------------------------------------------------------------------
+# commands without UI
+# --------------------------------------------------------------------------
+def cmd_boot():
+    try:
+        boot()
+    finally:
+        write(BOOT_DONE, datetime.datetime.now().isoformat() + "\n")
+
+
+def boot():
+    os.makedirs(STATE, exist_ok=True)
+    grow_disk()
+    if not any(f.startswith("ssh_host_") for f in os.listdir("/etc/ssh")):
+        run(["ssh-keygen", "-A"], check=False)
+    s = load_settings()
+    incoming = cloud_init_settings()
+    if incoming:
+        log("settings from cloud-init user-data: " + ", ".join(sorted(incoming)))
+        s = merge(s, incoming)
+        try:
+            apply(s)
+            return
+        except Exception as e:  # noqa: BLE001
+            log(f"cloud-init settings not applied: {e}")
+            write(os.path.join(STATE, "last-error"), str(e) + "\n")
+            return
+    if is_configured():
+        try:
+            apply(s)
+        except Exception as e:  # noqa: BLE001
+            log(f"apply failed: {e}")
+            write(os.path.join(STATE, "last-error"), str(e) + "\n")
+    else:
+        apply_network(s)
+        log("not set up yet - waiting for the setup on the console")
+
+
+def status_lines():
+    s = load_settings()
+    ip = primary_ip()
+    env = parse_env(read(os.path.join(STACK, ".env")))
+    sip = env.get("SERVER_IP") or ip or "?"
+    port = get(s, "HTTP_PORT")
+    mode = "static" if get(s, "NET_MODE") == "static" else "DHCP"
+    L = [f"EVE-Netboot-Installer appliance {version()}   ({read('/etc/hostname').strip()})", ""]
+    if not is_configured():
+        L += ["Not set up yet.", f"VM address      {ip or 'none yet'} ({mode})"]
+        return L
+    st = stack_state()
+    services = "  ".join(f"{x} {st.get(x, 'missing')}" for x in ("sync", "tftp", "web"))
+    status = json.loads(read(os.path.join(WWW, "eve", "status.json"), "{}") or "{}")
+    entries = status.get("entries", [])
+    ready = sum(1 for e in entries if e.get("netboot_ok") and not e.get("error"))
+    du = shutil.disk_usage("/")
+    L += [f"VM address      {ip or 'none'} ({mode})",
+          f"Status page     http://{sip}:{port}/",
+          f"DHCP settings   next-server {sip}",
+          "                boot file   eve-x86_64.efi  (x86_64 UEFI)",
+          "                            eve-arm64.efi   (arm64 UEFI)",
+          f"Services        {services}",
+          f"Installers      {ready} ready, last GitHub check {status.get('github_checked') or '-'}",
+          f"Disk            {(du.total - du.free) / 2**30:.1f} GB used, {du.free / 2**30:.1f} GB free"]
+    if get(s, "SMB_IMPORT_SHARE") == "yes":
+        L.append(f"Import share    \\\\{ip}\\eve-import  (user {ADMIN})")
+    if os.path.exists("/run/reboot-required"):
+        L.append("Updates         installed - a reboot is needed")
+    err = read(os.path.join(STATE, "last-error")).strip()
+    if err:
+        L += ["", "Last error: " + err[:200]]
+    return L
+
+
+def cmd_status():
+    print("\n".join(status_lines()))
+
+
+def cmd_export():
+    print(render_export(load_settings()), end="")
+
+
+def update_system(say=print):
+    """apt update/upgrade/autoremove; never touches packages marked manual."""
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    opts = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
+    say("Downloading package lists ...")
+    run(["apt-get", "update"], env=env)
+    say("Installing updates ...")
+    run(["apt-get", "-y", *opts, "full-upgrade"], env=env)
+    say("Removing packages that are no longer needed ...")
+    run(["apt-get", "-y", "autoremove", "--purge"], env=env)
+    run(["apt-get", "clean"], env=env)
+    s = load_settings()
+    if is_configured():
+        apply_stack(s)
+        ok = healthy(s)
+    else:
+        ok = True
+    reboot = os.path.exists("/run/reboot-required")
+    msg = "System updated. " + ("The appliance is working." if ok else
+                                "WARNING: the stack is not healthy - see 'eve-netboot logs'.")
+    if reboot:
+        msg += " A reboot is needed to finish (kernel or system library update)."
+    log(msg)
+    return ok, reboot, msg
+
+
+def version_tuple(ref):
+    """'ghcr.io/x/y:1.2.3' or 'v1.2.3' -> (1, 2, 3); None for latest/dev builds."""
+    m = re.search(r"(?:^|[:v])(\d+)\.(\d+)\.(\d+)$", ref)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def latest_release():
+    req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
+                                 headers={"Accept": "application/vnd.github+json",
+                                          "User-Agent": "eve-netboot-appliance"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)["tag_name"]
+
+
+def update_app(say=print):
+    """Newest release: pull image + compose.yaml, check health, roll back on failure."""
+    s = load_settings()
+    if s.get("EVE_IMAGE"):
+        return False, f"EVE_IMAGE is set to {s['EVE_IMAGE']} in the settings; remove it to use app updates."
+    tag = latest_release()
+    target = f"{IMAGE_REPO}:{tag.lstrip('v')}"
+    old_image = current_image(s)
+    current, newest = version_tuple(old_image), version_tuple(tag)
+    if current is None:
+        return False, (f"This VM runs a development build ({old_image}); "
+                       "app updates are only offered for release builds.")
+    if newest is None or newest <= current:
+        return True, f"Already on the newest version ({old_image.rsplit(':', 1)[-1]})."
+    say(f"Downloading {target} ...")
+    run(["docker", "pull", target])
+    compose_url = f"https://raw.githubusercontent.com/{REPO}/{tag}/compose.yaml"
+    with urllib.request.urlopen(compose_url, timeout=30) as r:
+        new_compose = r.read().decode()
+    old_compose = read(os.path.join(STACK, "compose.yaml"))
+    write(os.path.join(STACK, "compose.yaml"), new_compose)
+    write(os.path.join(STATE, "image"), target + "\n")
+    say("Restarting with the new version ...")
+    try:
+        apply_stack(s)
+        ok = healthy(s)
+    except Exception as e:  # noqa: BLE001
+        log(f"update failed: {e}")
+        ok = False
+    if ok:
+        log(f"app updated: {old_image} -> {target}")
+        return True, f"Updated to {tag}. The previous version stays available for a rollback."
+    say("The new version did not start correctly - rolling back ...")
+    write(os.path.join(STACK, "compose.yaml"), old_compose)
+    write(os.path.join(STATE, "image"), old_image + "\n")
+    apply_stack(s)
+    log(f"app update to {target} rolled back to {old_image}")
+    return False, f"Update to {tag} failed and was rolled back to {old_image}."
+
+
+def publish_export(s, minutes=15):
+    """Put the export on the status web server under a random name for a while."""
+    name = f"export-{secrets.token_hex(3)}.txt"
+    path = os.path.join(WWW, name)
+    write(path, render_export(s))
+    run(["systemd-run", f"--on-active={minutes}min", "/bin/rm", "-f", path], check=False)
+    env = parse_env(read(os.path.join(STACK, ".env")))
+    return f"http://{env.get('SERVER_IP') or primary_ip()}:{get(s, 'HTTP_PORT')}/{name}"
+
+
+def fetch_import(url):
+    if not re.match(r"^https?://", url):
+        url = "http://" + url
+    with urllib.request.urlopen(url, timeout=15) as r:
+        text = r.read(65536).decode("utf-8", "replace")
+    found = parse_env(text)
+    if not found:
+        raise ValueError("no settings found at that address")
+    return found
+
+
+# --------------------------------------------------------------------------
+# whiptail UI
+# --------------------------------------------------------------------------
+BACKTITLE = "EVE-Netboot-Installer appliance"
+
+
+class Cancel(Exception):
+    pass
+
+
+def rows(text, width=72):
+    """Screen lines whiptail needs for text in a box of the given width."""
+    return sum(max(1, -(-len(line) // (width - 6))) for line in text.split("\n"))
+
+
+def wt(kind, title, text, *args, height=0, width=72, extra=()):
+    cmd = ["whiptail", "--backtitle", BACKTITLE, "--title", title, *extra, kind, text,
+           str(height), str(width), *args]
+    p = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
+    return p.returncode, p.stderr.strip()
+
+
+def msg(title, text, height=0):
+    wt("--msgbox", title, text, height=height)
+
+
+def info(title, text):
+    wt("--infobox", title, text, height=8)
+
+
+def yesno(title, text, yes="Yes", no="No", default_no=False):
+    extra = ["--yes-button", yes, "--no-button", no] + (["--defaultno"] if default_no else [])
+    return wt("--yesno", title, text, extra=extra)[0] == 0
+
+
+def ask(title, text, default="", password=False, cancel="Back"):
+    kind = "--passwordbox" if password else "--inputbox"
+    rc, out = wt(kind, title, text, *([] if password else [default]), height=rows(text) + 8,
+                 extra=["--cancel-button", cancel])
+    if rc != 0:
+        raise Cancel
+    return out.strip()
+
+
+def choose(title, text, items, default=None, cancel="Back", ok="Select"):
+    args = []
+    for tag, label in items:
+        args += [tag, label]
+    extra = ["--cancel-button", cancel, "--ok-button", ok, "--notags"]
+    if default:
+        extra += ["--default-item", default]
+    rc, out = wt("--menu", title, text, str(min(len(items), 14)), *args,
+                 height=min(len(items), 14) + rows(text) + 7, extra=extra)
+    if rc != 0:
+        raise Cancel
+    return out
+
+
+def checklist(title, text, items, selected):
+    args = []
+    for tag, label in items:
+        args += [tag, label, "ON" if tag in selected else "OFF"]
+    rc, out = wt("--checklist", title, text, str(len(items)), *args, height=len(items) + rows(text) + 7,
+                 extra=["--cancel-button", "Back", "--separate-output", "--notags"])
+    if rc != 0:
+        raise Cancel
+    return out.split()
+
+
+def ask_password(title, what="admin", minimum=8):
+    while True:
+        p1 = ask(title, f"New {what} password (at least {minimum} characters):", password=True)
+        if len(p1) < minimum:
+            msg(title, f"The password must have at least {minimum} characters.")
+            continue
+        p2 = ask(title, "Type the password again:", password=True)
+        if p1 != p2:
+            msg(title, "The passwords do not match. Please try again.")
+            continue
+        return p1
+
+
+# ---- one screen per group of settings; each takes and returns a settings dict
+def screen_network(s):
+    s = dict(s)
+    current = ", ".join(f"{a} on {i}" for i, a in ipv4_addresses()) or "no address yet"
+    mode = choose("Network", f"How does this VM get its IP address?\n\nNow: {current}",
+                  [("dhcp", "Automatically (DHCP) - recommended with a DHCP reservation"),
+                   ("static", "Fixed address (static)")], default=get(s, "NET_MODE"))
+    s["NET_MODE"] = mode
+    if mode == "dhcp":
+        for k in ("NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "NET_INTERFACE"):
+            s.pop(k, None)
+        return s
+    s["NET_INTERFACE"] = s.get("NET_INTERFACE") or primary_interface() or ""
+    while True:
+        s["NET_ADDRESS"] = ask("Network", "IP address with prefix length\n(for example 192.168.1.20/24):",
+                               s.get("NET_ADDRESS") or (ipv4_addresses()[0][1] if ipv4_addresses() else ""))
+        s["NET_GATEWAY"] = ask("Network", "Default gateway (router), or empty for none:",
+                               s.get("NET_GATEWAY", ""))
+        s["NET_DNS"] = ask("Network", "DNS server(s), separated by spaces\n(for example 192.168.1.1 1.1.1.1):",
+                           s.get("NET_DNS", ""))
+        errors = [e for e in validate(s) if e.startswith("NET_")]
+        if not errors:
+            return s
+        msg("Network", "\n".join(errors))
+
+
+def screen_server_ip(s):
+    s = dict(s)
+    ip = primary_ip() or "?"
+    c = choose("Server address",
+               "Which address do the PXE clients use to reach this VM?\n"
+               "It goes into the DHCP settings and the boot menu.",
+               [("auto", f"This VM's own address (now {ip}) - recommended"),
+                ("manual", "Another address (NAT, port forwarding, several networks)")],
+               default="auto" if get(s, "SERVER_IP") == "auto" else "manual")
+    if c == "auto":
+        s["SERVER_IP"] = "auto"
+        return s
+    while True:
+        s["SERVER_IP"] = ask("Server address", "IPv4 address the PXE clients use:",
+                             "" if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP"))
+        if not [e for e in validate(s) if e.startswith("SERVER_IP")]:
+            return s
+        msg("Server address", "That is not an IPv4 address.")
+
+
+def screen_language(s):
+    s = dict(s)
+    s["EVE_LANGUAGE"] = choose("Language", "Language of the boot menu and the status page:",
+                               LANGUAGES, default=get(s, "EVE_LANGUAGE"))
+    return s
+
+
+def screen_mirror(s):
+    s = dict(s)
+    while True:
+        arches = checklist("Mirror", "Which architectures do your machines have?\n(Space selects, Enter continues)",
+                           [("amd64", "x86_64 (Intel/AMD)"), ("arm64", "ARM 64-bit")], get(s, "EVE_ARCHES").split())
+        if arches:
+            break
+        msg("Mirror", "Select at least one architecture.")
+    s["EVE_ARCHES"] = " ".join(arches)
+    while True:
+        flav = checklist("Mirror", "Which EVE-OS variants?",
+                         [("kvm", "kvm - the standard variant"),
+                          ("k", "k - with Kubernetes, needs >= 8 GB RAM on the target")],
+                         get(s, "EVE_FLAVOURS").split())
+        if flav:
+            break
+        msg("Mirror", "Select at least one variant.")
+    s["EVE_FLAVOURS"] = " ".join(flav)
+    while True:
+        n = ask("Mirror", "How many EVE-OS LTS release lines should be mirrored?\n"
+                "(each line is about 0.5 GB per architecture and variant)", get(s, "EVE_LTS_LINES"))
+        if n.isdigit() and 1 <= int(n) <= 10:
+            s["EVE_LTS_LINES"] = n
+            return s
+        msg("Mirror", "Enter a number from 1 to 10.")
+
+
+def screen_defaults(s):
+    s = dict(s)
+    s["EVE_DEFAULT_INSTALL_SERVER"] = ask(
+        "Installer defaults", "Controller that installed nodes connect to\n"
+        "(for example zedcloud.zededa.net), or empty to use what is in the ISO:",
+        s.get("EVE_DEFAULT_INSTALL_SERVER", ""))
+    s["EVE_DEFAULT_SERIAL"] = choose(
+        "Installer defaults", "Serial console of the machines you install:",
+        [("none", "none (screen only)"), ("ttyS0", "ttyS0"), ("ttyS1", "ttyS1"), ("ttyAMA0", "ttyAMA0 (ARM)")],
+        default=s.get("EVE_DEFAULT_SERIAL") or "none")
+    return s
+
+
+def screen_smb(s):
+    s = dict(s)
+    on = yesno("Import share",
+               "Share the folder for your own installer ISOs on the network (SMB),\n"
+               "so you can copy ISOs to it from Windows or macOS?\n\n"
+               f"Share: \\\\{primary_ip() or 'VM-address'}\\eve-import   user: {ADMIN}",
+               yes="Share it", no="No share", default_no=get(s, "SMB_IMPORT_SHARE") != "yes")
+    s["SMB_IMPORT_SHARE"] = "yes" if on else "no"
+    if on and (not smb_has_password() or yesno("Import share", "Set a new password for the share?",
+                                                default_no=True)):
+        s["SMB_PASSWORD"] = ask_password("Import share", "share")
+    return s
+
+
+def smb_has_password():
+    p = run(["pdbedit", "-L"], check=False, quiet=True)
+    return any(line.startswith(ADMIN + ":") for line in p.stdout.splitlines())
+
+
+def screen_advanced(s):
+    s = dict(s)
+    while True:
+        try:
+            c = choose("Advanced", "Change a setting (Back when done, then the changes are applied):", [
+            ("HTTP_PORT", f"HTTP port of the status page and menu   [{get(s, 'HTTP_PORT')}]"),
+            ("EVE_MENU_TIMEOUT", f"Boot menu timeout in seconds           [{s.get('EVE_MENU_TIMEOUT') or '300'}]"),
+            ("HOSTNAME", f"Host name of this VM                   [{get(s, 'HOSTNAME')}]"),
+            ("TZ", f"Time zone                              [{get(s, 'TZ')}]"),
+            ("SSH_PASSWORD_LOGIN", f"SSH login with password                [{get(s, 'SSH_PASSWORD_LOGIN')}]"),
+            ("ADMIN_SSH_KEYS", f"SSH public keys for {ADMIN}              [{len(get(s, 'ADMIN_SSH_KEYS').split(';')) if get(s, 'ADMIN_SSH_KEYS') else 0}]"),
+            ("EVE_GITHUB_TOKEN", f"GitHub token (only for API limits)     [{'set' if s.get('EVE_GITHUB_TOKEN') else 'none'}]"),
+            ("edit", "Edit the settings file (all settings, for experts)"),
+            ], cancel="Back")
+        except Cancel:
+            return s
+        if c == "edit":
+            save_settings(s)
+            subprocess.run(["nano", SETTINGS])
+            s = load_settings()
+            continue
+        if c == "SSH_PASSWORD_LOGIN":
+            s[c] = "yes" if yesno("Advanced", "Allow SSH login with the admin password?\n"
+                                  "(Login with an SSH key always works.)",
+                                  default_no=get(s, c) == "no") else "no"
+            continue
+        if c == "ADMIN_SSH_KEYS":
+            s[c] = ask("Advanced", "SSH public key(s), several separated by ';':", get(s, c), cancel="Cancel")
+            continue
+        hint = {"TZ": "Time zone, e.g. Europe/Amsterdam or UTC:",
+                "EVE_MENU_TIMEOUT": "Seconds before the boot menu boots the local disk (0 = wait forever):"}
+        try:
+            value = ask("Advanced", hint.get(c, f"New value for {c}:"), s.get(c) or get(s, c), cancel="Cancel")
+        except Cancel:
+            continue
+        old = s.get(c)
+        s[c] = value
+        errors = validate(s)
+        if c == "TZ" and not os.path.exists(os.path.join("/usr/share/zoneinfo", value)):
+            errors.append("unknown time zone")
+        if c == "EVE_MENU_TIMEOUT" and value and not value.isdigit():
+            errors.append("the timeout must be a number")
+        if errors:
+            msg("Advanced", "\n".join(errors))
+            if old is None:
+                s.pop(c, None)
+            else:
+                s[c] = old
+
+
+def summary(s):
+    net = ("DHCP" if get(s, "NET_MODE") == "dhcp" else
+           f"{get(s, 'NET_ADDRESS')} gw {get(s, 'NET_GATEWAY') or '-'} dns {get(s, 'NET_DNS') or '-'}")
+    return "\n".join([
+        f"Network          {net}",
+        f"Server address   {'this VM (' + (primary_ip() or '?') + ')' if get(s, 'SERVER_IP') == 'auto' else get(s, 'SERVER_IP')}",
+        f"Language         {dict(LANGUAGES)[get(s, 'EVE_LANGUAGE')]}",
+        f"Mirror           {get(s, 'EVE_LTS_LINES')} LTS lines, {get(s, 'EVE_ARCHES')}, {get(s, 'EVE_FLAVOURS')}",
+        f"Controller       {s.get('EVE_DEFAULT_INSTALL_SERVER') or 'from the ISO'}",
+        f"Serial console   {s.get('EVE_DEFAULT_SERIAL') or 'none'}",
+        f"Import share     {'yes' if get(s, 'SMB_IMPORT_SHARE') == 'yes' else 'no'}",
+    ])
+
+
+def apply_with_feedback(s, title="Applying"):
+    info(title, "Applying the settings and starting the services.\n\n"
+         "The first start takes up to a minute. Please wait ...")
+    try:
+        clean = apply(s)
+    except Exception as e:  # noqa: BLE001
+        log(f"apply failed: {e}")
+        msg("Error", f"The settings could not be applied:\n\n{e}\n\nDetails: {LOG}")
+        return None
+    return clean
+
+
+def wizard():
+    """First-time setup on the console. Returns when the appliance is set up."""
+    s = load_settings()
+    steps = ["welcome", "password", "network", "server", "language", "mirror", "defaults", "smb", "confirm"]
+    i = 0
+    while True:
+        step = steps[i]
+        try:
+            if step == "welcome":
+                c = choose("Welcome",
+                           "This VM is a network boot (PXE) server for LF Edge EVE-OS installers.\n"
+                           "A few questions and it is ready. Use the arrow keys, Enter and Tab.",
+                           [("new", "Set up this VM"),
+                            ("import", "Import the settings of another EVE-Netboot VM"),
+                            ("poweroff", "Power off")],
+                           cancel="Refresh", ok="Continue")
+                if c == "poweroff":
+                    if yesno("Power off", "Power off this VM?", default_no=True):
+                        run(["systemctl", "poweroff"], check=False)
+                    continue
+                if c == "import":
+                    url = ask("Import settings",
+                              "On the other VM choose 'Export settings' in the menu; it shows an\n"
+                              "address. Type that address here (or any URL of a settings file):")
+                    try:
+                        s = merge(s, fetch_import(url))
+                        msg("Import settings", "Settings imported. Please check them in the next steps.")
+                    except Exception as e:  # noqa: BLE001
+                        msg("Import settings", f"Could not import the settings:\n\n{e}")
+                        continue
+            elif step == "password":
+                s["ADMIN_PASSWORD"] = ask_password("Admin password")
+            elif step == "network":
+                new = screen_network(s)
+                if render_networkd(new) != render_networkd(s) or not os.path.exists(NET_DHCP):
+                    apply_network(new)  # so the next screens see the new address
+                s = new
+            elif step == "server":
+                s = screen_server_ip(s)
+            elif step == "language":
+                s = screen_language(s)
+            elif step == "mirror":
+                s = screen_mirror(s)
+            elif step == "defaults":
+                s = screen_defaults(s)
+            elif step == "smb":
+                s = screen_smb(s)
+            elif step == "confirm":
+                if not yesno("Ready", summary(s) + "\n\nApply these settings and start?",
+                             yes="Apply", no="Back"):
+                    raise Cancel
+                if apply_with_feedback(s, "Setting up") is not None:
+                    return
+                continue
+            i += 1
+        except Cancel:
+            i = max(0, i - 1)
+
+
+def menu():
+    """Settings menu (admin). Exit code 10 = open a shell, 0 = log out."""
+    while True:
+        s = load_settings()
+        try:
+            c = choose("Menu", "\n".join(status_lines()[2:5]) + "\n", [
+                ("status", "Status"),
+                ("network", "Network"),
+                ("server", "Server address (for DHCP and the boot menu)"),
+                ("mirror", "What to mirror (architectures, variants, releases)"),
+                ("language", "Language of the boot menu"),
+                ("defaults", "Installer defaults (controller, serial console)"),
+                ("smb", "Import share (SMB)"),
+                ("advanced", "Advanced settings"),
+                ("sync", "Check GitHub for new EVE-OS releases now"),
+                ("logs", "Show the log"),
+                ("export", "Export settings (for a new VM)"),
+                ("import", "Import settings"),
+                ("update", "Update the system (Debian packages)"),
+                ("app", "Update EVE-Netboot-Installer"),
+                ("password", "Change the admin password"),
+                ("shell", "Command line"),
+                ("reboot", "Reboot"),
+                ("poweroff", "Power off"),
+                ("logout", "Log out"),
+            ], cancel="Log out", ok="Open")
+        except Cancel:
+            return 0
+        try:
+            if c == "status":
+                msg("Status", "\n".join(status_lines()))
+            elif c in ("network", "server", "mirror", "language", "defaults", "smb", "advanced"):
+                new = {"network": screen_network, "server": screen_server_ip, "mirror": screen_mirror,
+                       "language": screen_language, "defaults": screen_defaults, "smb": screen_smb,
+                       "advanced": screen_advanced}[c](s)
+                if new != s or c == "smb":
+                    if c == "network" and os.environ.get("SSH_CONNECTION") and not yesno(
+                            "Network", "You are connected over SSH. If the address changes, the connection "
+                            "drops and you have to reconnect to the new address. Continue?", default_no=True):
+                        continue
+                    apply_with_feedback(new)
+            elif c == "sync":
+                info("GitHub", "Restarting the sync ...")
+                compose("restart", "sync", check=False)
+                msg("GitHub", "The check runs in the background; new releases appear on the status page.")
+            elif c == "logs":
+                p = compose("logs", "--no-color", "--tail", "200", "sync", check=False)
+                path = "/tmp/eve-netboot-logs.txt"
+                write(path, p.stdout + p.stderr)
+                wt("--textbox", "Log (sync, last 200 lines)", path, height=22, width=78, extra=["--scrolltext"])
+            elif c == "export":
+                url = publish_export(s)
+                home_copy = f"/home/{ADMIN}/eve-netboot-settings.txt"
+                write(home_copy, render_export(s))
+                shutil.chown(home_copy, ADMIN, ADMIN)
+                msg("Export settings",
+                    f"The settings are available for 15 minutes at:\n\n   {url}\n\n"
+                    "- In a new VM: choose 'Import the settings ...' in the setup and type this address.\n"
+                    "- Or save the page and use its text as the cloud-init user-data of a new VM.\n\n"
+                    f"Also saved as /home/{ADMIN}/eve-netboot-settings.txt. Passwords are not included.")
+            elif c == "import":
+                url = ask("Import settings", "Address of the settings (shown by 'Export settings' on the other VM):",
+                          cancel="Cancel")
+                new = merge(s, fetch_import(url))
+                if yesno("Import settings", summary(new) + "\n\nApply these settings?", yes="Apply", no="Cancel"):
+                    apply_with_feedback(new)
+            elif c == "update":
+                if yesno("Update the system",
+                         "Install the newest Debian updates now?\n\n"
+                         "Security updates are also installed automatically every day.\n"
+                         "Tip: take a snapshot of the VM first if your hypervisor supports it.",
+                         yes="Update", no="Cancel"):
+                    ok, reboot, text = update_system(lambda t: info("Updating", t))
+                    if reboot and yesno("Update the system", text + "\n\nReboot now?", yes="Reboot", no="Later"):
+                        run(["systemctl", "reboot"], check=False)
+                    elif not reboot:
+                        msg("Update the system", text)
+            elif c == "app":
+                if yesno("Update EVE-Netboot-Installer",
+                         f"Now running: {current_image(s)}\n\nLook for a newer release and install it?\n"
+                         "If the new version does not start, the current one is restored automatically.",
+                         yes="Update", no="Cancel"):
+                    ok, text = update_app(lambda t: info("Updating", t))
+                    msg("Update EVE-Netboot-Installer", text)
+            elif c == "password":
+                pw = ask_password("Admin password")
+                run(["chpasswd"], input=f"{ADMIN}:{pw}\n")
+                msg("Admin password", "The password has been changed.")
+            elif c == "shell":
+                return 10
+            elif c == "reboot":
+                if yesno("Reboot", "Reboot this VM now?", default_no=True):
+                    run(["systemctl", "reboot"], check=False)
+            elif c == "poweroff":
+                if yesno("Power off", "Power off this VM now?", default_no=True):
+                    run(["systemctl", "poweroff"], check=False)
+            elif c == "logout":
+                return 0
+        except Cancel:
+            continue
+        except Exception as e:  # noqa: BLE001
+            log(f"menu: {c}: {e}")
+            msg("Error", f"{e}\n\nDetails: {LOG}")
+
+
+def console():
+    """tty1: wizard until set up, then status + login to the menu."""
+    os.environ.setdefault("TERM", "linux")
+    # settings from cloud-init are applied by "eve-netboot boot": wait for it, or
+    # the wizard would start on a VM that is about to be set up
+    started = time.time()
+    while not os.path.exists(BOOT_DONE) and time.time() - started < 900:
+        print("\033[2J\033[H EVE-Netboot-Installer appliance\n\n Starting, please wait ...", flush=True)
+        time.sleep(3)
+    while True:
+        if not is_configured():
+            wizard()
+            continue
+        print("\033[2J\033[H" + "\n".join(" " + line for line in status_lines()), flush=True)
+        if admin_has_password():
+            print("\n Press Enter to log in (user admin) and open the settings menu.", flush=True)
+        else:
+            print("\n No admin password is set yet. Press Enter to set one.", flush=True)
+        if not wait_enter(30):
+            continue
+        try:
+            if not admin_has_password():
+                pw = ask_password("Admin password")
+                run(["chpasswd"], input=f"{ADMIN}:{pw}\n")
+                continue
+            pw = ask("Log in", f"Password of {ADMIN}:", password=True, cancel="Cancel")
+        except Cancel:
+            continue
+        if not check_password(ADMIN, pw):
+            log("console: wrong admin password")
+            time.sleep(3)
+            msg("Log in", "Wrong password.")
+            continue
+        if menu() == 10:
+            print("\033[2J\033[HType 'exit' to return to the status screen, 'eve-netboot menu' for the menu.\n",
+                  flush=True)
+            subprocess.run(["su", "-w", "EVE_NETBOOT_NO_MENU", "-", ADMIN],
+                           env=dict(os.environ, EVE_NETBOOT_NO_MENU="1"))
+
+
+def wait_enter(seconds):
+    """True when Enter is pressed within seconds; keys are not echoed."""
+    import select
+    import termios
+    fd = sys.stdin.fileno()
+    try:
+        old = termios.tcgetattr(fd)
+    except termios.error:
+        time.sleep(seconds)
+        return False
+    new = termios.tcgetattr(fd)
+    new[3] &= ~(termios.ECHO | termios.ICANON)
+    try:
+        termios.tcsetattr(fd, termios.TCSANOW, new)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        end = time.time() + seconds
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], max(0.1, end - time.time()))
+            if r:
+                data = os.read(fd, 64)
+                if b"\r" in data or b"\n" in data:
+                    return True
+        return False
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, old)
+
+
+# --------------------------------------------------------------------------
+# main
+# --------------------------------------------------------------------------
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "status"
+    if os.geteuid() != 0 and cmd not in ("help", "--help"):
+        os.execvp("sudo", ["sudo", "--", os.path.abspath(argv[0]), *argv[1:]])
+    if cmd == "boot":
+        cmd_boot()
+    elif cmd == "console":
+        console()
+    elif cmd == "menu":
+        return menu()
+    elif cmd == "status":
+        cmd_status()
+    elif cmd == "apply":
+        s = load_settings()
+        errors = validate(s)
+        if errors:
+            print("\n".join(errors), file=sys.stderr)
+            return 1
+        apply(s)
+        print("applied")
+    elif cmd == "logs":
+        os.execvp("docker", ["docker", "compose", "--project-directory", STACK, "-p", "eve-netboot",
+                             "logs", "-f", "--tail", "100", *argv[2:]])
+    elif cmd == "sync":
+        compose("restart", "sync")
+        print("sync restarted - see: eve-netboot logs sync")
+    elif cmd == "update-system":
+        ok, reboot, text = update_system()
+        print(text)
+        return 0 if ok else 1
+    elif cmd == "update-app":
+        ok, text = update_app()
+        print(text)
+        return 0 if ok else 1
+    elif cmd == "export":
+        cmd_export()
+    else:
+        print(__doc__)
+        return 0 if cmd in ("help", "--help") else 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

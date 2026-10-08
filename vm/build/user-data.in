@@ -1,0 +1,17 @@
+#cloud-config
+# Build-time only: fetch the payload from build.sh's server, provision the
+# image in its own systemd unit (so cloud-init can be reset), report back and
+# power off. Not part of the appliance.
+users: []
+ssh_pwauth: false
+runcmd:
+  - mkdir -p /root/payload
+  - curl -fsS http://10.0.2.2:@@PORT@@/payload.tar.gz | tar xz -C /root/payload
+  - >-
+    systemd-run --unit=eve-provision --no-block --property=TimeoutStartSec=infinity
+    sh -c 'sh /root/payload/provision.sh /root/payload "@@VERSION@@" "@@IMAGE@@" > /root/provision.log 2>&1;
+    rc=$?;
+    curl -fsS -X POST --data-binary @/root/provision.log "http://10.0.2.2:@@PORT@@/done?rc=$rc";
+    rm -rf /root/payload /root/provision.log;
+    fstrim -av;
+    systemctl poweroff'

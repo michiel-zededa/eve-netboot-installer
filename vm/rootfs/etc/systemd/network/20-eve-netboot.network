@@ -1,0 +1,10 @@
+# managed by eve-netboot - change with: eve-netboot menu
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=yes
+
+[DHCPv4]
+# the MAC address identifies the VM, so DHCP reservations by MAC work
+ClientIdentifier=mac

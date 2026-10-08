@@ -1,0 +1,2 @@
+# the admin user runs the appliance menu without typing the password again
+admin ALL=(root) NOPASSWD: /usr/local/sbin/eve-netboot

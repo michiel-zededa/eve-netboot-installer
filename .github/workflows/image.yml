@@ -2,6 +2,8 @@
 #   ghcr.io/<owner>/<repo>:latest   (default branch)
 #   ghcr.io/<owner>/<repo>:<tag>    (git tags like v1.2.3)
 # Users can then set EVE_IMAGE=ghcr.io/<owner>/<repo>:latest instead of building.
+# For v* tags it also builds the VM appliance (vm/) and attaches the images
+# (qcow2 amd64/arm64, VMDK/OVA amd64) to the release.
 name: image
 
 on:
@@ -45,3 +47,82 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---- VM appliance: built for every version tag, attached to its release.
+  # Also runs on "Run workflow" (manual) to test a build; the images are then
+  # only available as workflow artifacts.
+  vm:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            qemu: qemu-system-x86
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu: qemu-system-arm qemu-efi-aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-utils ${{ matrix.qemu }}
+      - name: Enable KVM when the runner has it
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+            sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          fi
+          ls -l /dev/kvm 2>/dev/null || echo "no KVM on this runner: emulation, the build takes longer"
+      - id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v=${GITHUB_REF_NAME#v}; image=ghcr.io/${GITHUB_REPOSITORY}:$v
+          else
+            v=dev-${GITHUB_SHA::7}; image=ghcr.io/${GITHUB_REPOSITORY}:latest
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Build the appliance
+        run: >-
+          vm/build/build.sh --arch ${{ matrix.arch }} --version ${{ steps.version.outputs.version }}
+          --image ${{ steps.version.outputs.image }} --out dist --timeout 170
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vm-${{ matrix.arch }}
+          path: |
+            dist/eve-netboot-*.qcow2
+            dist/eve-netboot-*.vmdk
+            dist/eve-netboot-*.ova
+            dist/eve-netboot-*.sha256
+            dist/eve-netboot-*.provision.log
+          compression-level: 0
+          retention-days: 14
+
+  release-assets:
+    needs: vm
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach the VM images to the release (created if it does not exist yet)
+        run: |
+          cd dist
+          cat eve-netboot-*.sha256 > SHA256SUMS
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
+            eve-netboot-*.qcow2 eve-netboot-*.ova eve-netboot-*.vmdk SHA256SUMS

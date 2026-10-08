@@ -1,6 +1,8 @@
 # Lint for real problems only (pyflakes, pycodestyle errors/warnings, bugbear).
 # Long lines are fine: the generated iPXE script and HTML live in strings.
 target-version = "py312"
+# the appliance helper has no .py extension
+extend-include = ["vm/rootfs/usr/local/sbin/eve-netboot"]
 
 [lint]
 select = ["E", "F", "W", "B"]
