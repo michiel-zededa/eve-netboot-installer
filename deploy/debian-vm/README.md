@@ -95,6 +95,35 @@ Open `user-data.yaml` and change the places marked **(1)**, **(2)** and **(3)**.
 | `SMB_IMPORT_SHARE` | `no` | `yes` = share the import folder over SMB as `eve-import` |
 | `SMB_USER` / `SMB_PASSWORD` | `eve` / – | Credentials of that share (required when enabled) |
 
+**Example: a typical set of changes** (lines starting with `-` are the
+original, `+` your version):
+
+```diff
+     ssh_authorized_keys:
+-      - ssh-ed25519 AAAA-REPLACE-WITH-YOUR-PUBLIC-KEY you@example
++      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyOnly you@laptop
+ ...
+     - name: eve
+-      password: ChangeMe-EVE-1
++      password: Pick-Your-Own-Start-Password-7
+ ...
+-      EVE_SOURCE_REF=main
++      EVE_SOURCE_REF=v1.0.0
+ ...
+-      EVE_DEFAULT_INSTALL_SERVER=
++      EVE_DEFAULT_INSTALL_SERVER=zedcloud.zededa.net
+ ...
+-      SMB_IMPORT_SHARE=no
++      SMB_IMPORT_SHARE=yes
+ ...
+-      SMB_PASSWORD=
++      SMB_PASSWORD=Another-Password-For-The-Share
+```
+
+- Keep the indentation exactly as it is: the settings are part of a YAML block.
+- Do not put a comment after a value on the same line (`HTTP_PORT=8080  # web`): everything after `=` becomes the value. Put comments on their own line.
+- The [deployment guide](../../docs/deployment.md#2-choose-your-settings) has more example settings (architectures, ports, boot file aliases); they work the same in this block.
+
 **Other application settings:**
 
 - Any other setting from the application's [`.env.example`](../../.env.example) (for example `IPXE_ALIASES_X86_64` or `EVE_DEFAULT_PERSIST_DISK`) can be added to the same block.

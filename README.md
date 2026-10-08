@@ -130,12 +130,25 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
 ## Quick start
 
+The fastest way, with the prebuilt image. **[docs/deployment.md](docs/deployment.md)** is the full step-by-step guide, with checks after every step and example settings.
+
+```bash
+mkdir -p ~/eve-netboot && cd ~/eve-netboot
+curl -fsSLO https://raw.githubusercontent.com/michiel-zededa/eve-netboot-installer/main/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/michiel-zededa/eve-netboot-installer/main/.env.example
+```
+
+Edit `.env` and set these two lines:
+
 ```sh
-git clone https://github.com/michiel-zededa/eve-netboot-installer.git
-cd eve-netboot-installer
-cp .env.example .env
-$EDITOR .env                  # set SERVER_IP to this host's LAN address
-docker compose up -d          # the first start builds the image (~5 min)
+SERVER_IP=192.168.1.10        # this host's LAN address, as the PXE clients see it
+EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest
+```
+
+Start the stack:
+
+```bash
+docker compose pull && docker compose up -d
 ```
 
 Then:
@@ -144,46 +157,18 @@ Then:
 2. **Open the status page** at `http://SERVER_IP:8080/` and wait for the first sync to finish.
 3. **Boot a machine:** network boot it, pick a release, review the options and press **`i`**.
 
+To build the image yourself instead, clone the repository, leave `EVE_IMAGE` empty and run `docker compose up -d --build` (the first build takes about 5 minutes).
+
 > [!WARNING]
 > The EVE installer wipes the target disk without further confirmation. The menu always shows a summary first and only installs after **`i`** is pressed.
-
-### Using the prebuilt image
-
-Every push to `main` publishes a multi-arch image to the GitHub Container Registry. To skip the local build, add it to `.env`:
-
-```sh
-EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest
-```
-
-Then pull and start without building:
-
-```sh
-docker compose pull && docker compose up -d --no-build
-```
 
 ## Deployment options
 
 | Platform | Guide |
 |---|---|
-| Any Linux host with Docker Compose | [Quick start](#quick-start) |
-| A compose manager or NAS (web UI that runs compose stacks) | [Compose managers and NAS](#compose-managers-and-nas) |
+| Any Linux host with Docker Compose | [Deployment guide, path A](docs/deployment.md#path-a-linux-host-with-the-docker-compose-command) |
+| A NAS or a web UI that runs compose stacks | [Deployment guide, path B](docs/deployment.md#path-b-nas-or-compose-manager-web-ui) |
 | EVE-OS edge node (ZEDEDA) or any hypervisor | [deploy/debian-vm](deploy/debian-vm/README.md): a cloud-init Debian VM that installs and runs the stack by itself |
-
-### Compose managers and NAS
-
-Web UIs that manage compose stacks usually keep `compose.yaml` and its environment in their own folder, not in a checkout of this repository. The stack works unchanged there:
-
-- **Stack file:** paste [compose.yaml](compose.yaml) as it is.
-- **Environment:** start from [.env.example](.env.example).
-- **Paths:** use absolute paths for `DATA_DIR` and `IMPORT_DIR`, because relative paths resolve against the manager's stack folder.
-- **Image, option 1 (prebuilt):** set `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest` and nothing has to be built.
-- **Image, option 2 (local build):** clone this repository somewhere on the host and set `EVE_SRC_DIR` to that absolute path. Update with `git pull` in that folder followed by a rebuild of the stack.
-
-Points to check on a shared host:
-
-- **HTTP port:** many NAS web interfaces use port 80 themselves; keep `HTTP_PORT` on 8080 or another free port.
-- **TFTP:** only one TFTP server can use UDP 69. Stop any other PXE stack first. With `IPXE_ALIASES_X86_64` the iPXE binary is also published under the boot file name your DHCP server already hands out, so switching needs no DHCP change.
-- **Backups:** `DATA_DIR/www/eve/releases` holds the mirrored ISOs. Exclude it from backups if you like; it is downloaded again automatically.
 
 ## Configuration
 
@@ -205,7 +190,7 @@ Everything is configured in `.env`; [.env.example](.env.example) documents every
 | `IPXE_ALIASES_X86_64` | | Extra file names for the iPXE binary, to match a boot file name your DHCP already hands out |
 | `EVE_GITHUB_TOKEN` | | Optional; raises the GitHub API rate limit (formerly `GITHUB_TOKEN`) |
 
-Apply changes with `docker compose up -d`. The menu is regenerated on every start.
+Apply changes with `docker compose up -d`. The menu is regenerated on every start. [docs/deployment.md](docs/deployment.md#2-choose-your-settings) has ready-made examples for common setups.
 
 ## DHCP
 
@@ -239,7 +224,8 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 |---|---|
 | Follow logs | `docker compose logs -f sync` (or `tftp`, `web`) |
 | Check GitHub now | `docker compose restart sync` |
-| Update | `git pull && docker compose up -d --build` |
+| Update (prebuilt image) | `docker compose pull && docker compose up -d` |
+| Update (own build) | `git pull && docker compose up -d --build` |
 | Stop | `docker compose down` (data in `DATA_DIR` is kept) |
 
 The status page (`http://SERVER_IP:HTTP_PORT/`) links to the generated menu (`/eve/eve.ipxe`) and a machine-readable `/eve/status.json`.
@@ -295,7 +281,7 @@ How the translations work:
 │   ├── eve_sync.py        # mirror, import, menu and status page generator
 │   └── i18n/              # translations
 ├── docker/                # iPXE build script, embedded iPXE script, entrypoint
-├── docs/                  # how it works, DHCP configuration
+├── docs/                  # deployment guide, how it works, DHCP configuration
 ├── tests/                 # unit tests + EVE GRUB fixtures
 └── deploy/
     └── debian-vm/         # cloud-init Debian VM for EVE nodes / any hypervisor
