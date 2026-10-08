@@ -15,7 +15,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 HELPER = os.path.join(HERE, "..", "vm", "rootfs", "usr", "local", "sbin", "eve-netboot")
 
-os.environ["EVE_NETBOOT_ETC"] = tempfile.mkdtemp(prefix="eve-netboot-etc-")
+os.environ["ENI_ETC"] = tempfile.mkdtemp(prefix="eve-netboot-etc-")
 _loader = importlib.machinery.SourceFileLoader("eve_netboot", HELPER)
 _spec = importlib.util.spec_from_loader("eve_netboot", _loader)
 app = importlib.util.module_from_spec(_spec)
@@ -36,7 +36,7 @@ class ParseEnvTest(unittest.TestCase):
         text = """
 # comment
 SERVER_IP=192.168.1.10          # <- marker
-EVE_ARCHES=amd64 arm64
+ENI_ARCHES=amd64 arm64
 QUOTED="a # not a comment"
 SINGLE='x'
 export TZ=Europe/Amsterdam
@@ -45,7 +45,7 @@ BROKEN
 EMPTY=
 """
         self.assertEqual(app.parse_env(text), {
-            "SERVER_IP": "192.168.1.10", "EVE_ARCHES": "amd64 arm64", "QUOTED": "a # not a comment",
+            "SERVER_IP": "192.168.1.10", "ENI_ARCHES": "amd64 arm64", "QUOTED": "a # not a comment",
             "SINGLE": "x", "TZ": "Europe/Amsterdam", "EMPTY": ""})
 
     def test_password_with_hash_needs_quotes(self):
@@ -56,8 +56,8 @@ EMPTY=
 class UserDataTest(unittest.TestCase):
 
     def test_plain_key_value(self):
-        self.assertEqual(app.parse_user_data("SERVER_IP=auto\nEVE_LANGUAGE=nl\n"),
-                         {"SERVER_IP": "auto", "EVE_LANGUAGE": "nl"})
+        self.assertEqual(app.parse_user_data("SERVER_IP=auto\nENI_LANGUAGE=nl\n"),
+                         {"SERVER_IP": "auto", "ENI_LANGUAGE": "nl"})
 
     def test_not_ours(self):
         for text in ("", "   \n", "#!/bin/sh\necho hi\n", "Content-Type: multipart/mixed\n",
@@ -70,17 +70,31 @@ class UserDataTest(unittest.TestCase):
 password: x
 eve_netboot:
   server_ip: auto
-  EVE_ARCHES: amd64 arm64
+  ENI_ARCHES: amd64 arm64
   SSH_PASSWORD_LOGIN: false
-  EVE_LTS_LINES: 2
+  ENI_LTS_LINES: 2
 """
         self.assertEqual(app.parse_user_data(text), {
-            "SERVER_IP": "auto", "EVE_ARCHES": "amd64 arm64", "SSH_PASSWORD_LOGIN": "no", "EVE_LTS_LINES": "2"})
+            "SERVER_IP": "auto", "ENI_ARCHES": "amd64 arm64", "SSH_PASSWORD_LOGIN": "no", "ENI_LTS_LINES": "2"})
 
     @unittest.skipUnless(HAVE_YAML, "python3-yaml not installed")
     def test_cloud_config_without_our_section(self):
         self.assertIsNone(app.parse_user_data("#cloud-config\npackages: [htop]\n"))
         self.assertIsNone(app.parse_user_data("#cloud-config\n: [broken\n"))
+
+    def test_old_names_are_migrated(self):
+        # pre-1.3 names in user-data, settings.env or an import
+        self.assertEqual(app.parse_user_data("EVE_LANGUAGE=de\nEVE_ARCHES=arm64\nEVE_DEFAULT_SERIAL=ttyS0\n"),
+                         {"ENI_LANGUAGE": "de", "ENI_ARCHES": "arm64", "EVE_DEFAULT_SERIAL": "ttyS0"})
+        # the new name wins over the old one
+        self.assertEqual(app.parse_env("EVE_LANGUAGE=de\nENI_LANGUAGE=nl\n"), {"ENI_LANGUAGE": "nl"})
+        self.assertNotIn("EVE_SRC_DIR", app.merge({}, app.parse_env("EVE_SRC_DIR=/x\n")))
+        self.assertNotIn("ENI_SRC_DIR", app.merge({}, app.parse_env("EVE_SRC_DIR=/x\n")))
+
+    @unittest.skipUnless(HAVE_YAML, "python3-yaml not installed")
+    def test_old_names_in_cloud_config(self):
+        self.assertEqual(app.parse_user_data("#cloud-config\neve_netboot:\n  EVE_LTS_LINES: 2\n"),
+                         {"ENI_LTS_LINES": "2"})
 
     def test_merge_drops_fixed_keys(self):
         self.assertEqual(app.merge({"A": "1", "B": "2"}, {"B": "3", "DATA_DIR": "/x"}), {"A": "1", "B": "3"})
@@ -102,14 +116,14 @@ class ValidateTest(unittest.TestCase):
 
     def test_values(self):
         for bad in ({"SERVER_IP": "host.example"}, {"HTTP_PORT": "69"}, {"HTTP_PORT": "x"},
-                    {"HOSTNAME": "bad_name"}, {"EVE_LANGUAGE": "xx"}, {"EVE_ARCHES": "riscv"},
-                    {"EVE_FLAVOURS": "xen"}, {"SMB_IMPORT_SHARE": "maybe"},
+                    {"HOSTNAME": "bad_name"}, {"ENI_LANGUAGE": "xx"}, {"ENI_ARCHES": "riscv"},
+                    {"ENI_FLAVOURS": "xen"}, {"SMB_IMPORT_SHARE": "maybe"},
                     {"EVE_DEFAULT_SERIAL": "ttyUSB0"}, {"EVE_DEFAULT_EXTRA_ARGS": "it's"}):
             with self.subTest(bad=bad):
                 self.assertTrue(app.validate(bad))
         # empty means "use the default"
-        self.assertEqual(app.validate({"EVE_ARCHES": ""}), [])
-        self.assertEqual(app.validate({"EVE_ARCHES": "amd64 arm64", "EVE_FLAVOURS": "kvm k"}), [])
+        self.assertEqual(app.validate({"ENI_ARCHES": ""}), [])
+        self.assertEqual(app.validate({"ENI_ARCHES": "amd64 arm64", "ENI_FLAVOURS": "kvm k"}), [])
 
 
 class VersionTest(unittest.TestCase):
@@ -130,22 +144,22 @@ class RenderTest(unittest.TestCase):
         self.assertIn("HOSTNAME=x", text)
 
     def test_export_has_no_secrets_and_round_trips(self):
-        s = {"EVE_GITHUB_TOKEN": "ghp_secret123", "ADMIN_PASSWORD": "pw-secret", "EVE_LANGUAGE": "nl",
+        s = {"ENI_GITHUB_TOKEN": "ghp_secret123", "ADMIN_PASSWORD": "pw-secret", "ENI_LANGUAGE": "nl",
              "ADMIN_SSH_KEYS": "ssh-ed25519 AAAA x"}
         text = app.render_export(s)
         self.assertNotIn("ghp_secret123", text)
         self.assertNotIn("pw-secret", text)
-        self.assertEqual(app.parse_user_data(text), {"EVE_LANGUAGE": "nl", "ADMIN_SSH_KEYS": "ssh-ed25519 AAAA x"})
+        self.assertEqual(app.parse_user_data(text), {"ENI_LANGUAGE": "nl", "ADMIN_SSH_KEYS": "ssh-ed25519 AAAA x"})
 
     def test_stack_env(self):
-        s = {"EVE_LANGUAGE": "nl", "HOSTNAME": "vm", "NET_MODE": "static", "DATA_DIR": "/elsewhere",
+        s = {"ENI_LANGUAGE": "nl", "HOSTNAME": "vm", "NET_MODE": "static", "DATA_DIR": "/elsewhere",
              "EVE_DEFAULT_INSTALL_SERVER": "zedcloud.zededa.net", "EMPTY": ""}
         env = app.parse_env(app.render_stack_env(s, "192.0.2.5", "img:1"))
         self.assertEqual(env["SERVER_IP"], "192.0.2.5")
         self.assertEqual(env["DATA_DIR"], app.DATA)
         self.assertEqual(env["IMPORT_DIR"], app.IMPORT)
-        self.assertEqual(env["EVE_IMAGE"], "img:1")
-        self.assertEqual(env["EVE_LANGUAGE"], "nl")
+        self.assertEqual(env["ENI_IMAGE"], "img:1")
+        self.assertEqual(env["ENI_LANGUAGE"], "nl")
         self.assertEqual(env["HTTP_PORT"], "8080")
         self.assertEqual(env["EVE_DEFAULT_INSTALL_SERVER"], "zedcloud.zededa.net")
         for vm_only in ("HOSTNAME", "NET_MODE", "EMPTY"):
@@ -176,7 +190,7 @@ class ReferenceExamplesTest(unittest.TestCase):
 
     EXAMPLES = os.path.join(HERE, "..", "vm", "examples")
     # build-time or fixed in the VM, so not in the references
-    NOT_IN_REFERENCE = {"IPXE_VERSION", "DATA_DIR", "IMPORT_DIR", "EVE_SRC_DIR"}
+    NOT_IN_REFERENCE = {"IPXE_VERSION", "DATA_DIR", "IMPORT_DIR", "ENI_SRC_DIR"}
 
     def read(self, name):
         with open(os.path.join(self.EXAMPLES, name), encoding="utf-8") as f:

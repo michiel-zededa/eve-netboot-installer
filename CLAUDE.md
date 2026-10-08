@@ -58,6 +58,11 @@ CI (`.github/workflows/test.yml`) also runs `ruff check app tests deploy`
   variant comes from the file name.
 - Keep env var names and the `DATA_DIR` layout backward compatible: existing
   installations update with a `git pull` or a new image.
+- Naming: `ENI_*` = settings of EVE-Netboot-Installer itself, `EVE_DEFAULT_*`
+  = defaults of EVE-OS's installation options. The pre-1.3 `EVE_*` names keep
+  working: compose falls back (`${ENI_X:-${EVE_X:-default}}`, tested), the
+  sync's `_env()` falls back, the appliance migrates them (`RENAMED`). A new
+  ENI_ setting needs the same fallback in compose.yaml.
 - The repository is generic for any Docker Compose host. No site-specific
   hosts, paths or NAS-specific instructions.
 - Appliance: the console shows only status without login; the menu needs the

@@ -44,7 +44,9 @@ Also check:
 
 All settings live in one `.env` file. Only `SERVER_IP` is required; every
 other setting has a sensible default. [.env.example](../.env.example)
-documents all of them.
+documents all of them: `ENI_*` are settings of EVE-Netboot-Installer itself,
+`EVE_DEFAULT_*` the defaults of EVE-OS's installation options. (Before 1.3 the
+`ENI_*` settings were called `EVE_*`; the old names still work.)
 
 Start from the example that is closest to what you want and change the
 values marked `# <-`. The lines already exist in `.env.example`; change their
@@ -56,10 +58,10 @@ them, and you can delete them.
 
 ```sh
 SERVER_IP=192.168.1.10                                           # <- answer 1
-EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
+ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
 ```
 
-The `env.example` of a release already has `EVE_IMAGE` set to that release's
+The `env.example` of a release already has `ENI_IMAGE` set to that release's
 image; `:latest` instead follows every change on the main branch.
 
 This mirrors the 3 newest EVE-OS LTS lines for amd64 (`kvm`), serves HTTP on
@@ -69,14 +71,14 @@ port 8080 and shows the menu in English.
 
 ```sh
 SERVER_IP=192.168.1.10                                           # <- answer 1
-EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
+ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
 
 # where your own installer ISOs are (for example controller-specific builds)
 IMPORT_DIR=/srv/iso/eve                                          # <- your folder
-EVE_IMPORT_LABEL=ISO share
+ENI_IMPORT_LABEL=ISO share
 
 # menu language: en de fr es pt nl da no
-EVE_LANGUAGE=en                                                  # <-
+ENI_LANGUAGE=en                                                  # <-
 
 # pre-fill the installation options (all can still be changed at boot)
 EVE_DEFAULT_INSTALL_SERVER=zedcloud.zededa.net                   # <- your controller
@@ -86,12 +88,12 @@ EVE_DEFAULT_SERIAL=ttyS0                                         # <- or none
 ### More architectures and variants
 
 ```sh
-EVE_ARCHES=amd64 arm64        # no quotes needed
-EVE_FLAVOURS=kvm k            # k = Kubernetes variant, needs >= 8 GB RAM on the target
-EVE_LTS_LINES=2               # fewer lines = less disk space
+ENI_ARCHES=amd64 arm64        # no quotes needed
+ENI_FLAVOURS=kvm k            # k = Kubernetes variant, needs >= 8 GB RAM on the target
+ENI_LTS_LINES=2               # fewer lines = less disk space
 ```
 
-Every combination costs disk space: up to `EVE_LTS_LINES` x arches x
+Every combination costs disk space: up to `ENI_LTS_LINES` x arches x
 flavours variants, at about 0.5 GB (`kvm`) or 0.7 GB (`k`) each. The example
 above is up to 2 x 2 x 2 = 8 variants, about 5 GB. Combinations that a release
 does not publish (older releases have no arm64 `k` ISO) are skipped.
@@ -116,7 +118,7 @@ The iPXE binary is then published under that name too.
 ### Called from another iPXE menu
 
 ```sh
-EVE_MENU_MODE=chained         # "exit" returns to the calling menu instead of booting the local disk
+ENI_MENU_MODE=chained         # "exit" returns to the calling menu instead of booting the local disk
 ```
 
 Chain it from your menu with `chain http://192.168.1.10:8080/eve/eve.ipxe`.
@@ -125,10 +127,10 @@ Chain it from your menu with `chain http://192.168.1.10:8080/eve/eve.ipxe`.
 
 | | Prebuilt image (recommended) | Own build |
 |---|---|---|
-| Setting | `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1` (already set in a release's `env.example`) | leave `EVE_IMAGE` empty |
+| Setting | `ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1` (already set in a release's `env.example`) | leave `ENI_IMAGE` empty |
 | Needs | `compose.yaml` and `.env`, both attached to every release | a clone of this repository |
 | First start | about 1 minute | about 5 minutes (iPXE is compiled) |
-| Pin a version | `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.0.0` | `git checkout v1.0.0` |
+| Pin a version | `ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.0.0` | `git checkout v1.0.0` |
 
 Fixed versions are listed on the [releases page](https://github.com/michiel-zededa/eve-netboot-installer/releases).
 
@@ -141,7 +143,7 @@ Fixed versions are listed on the [releases page](https://github.com/michiel-zede
 **With the prebuilt image**, two files are enough. Every
 [release](https://github.com/michiel-zededa/eve-netboot-installer/releases)
 has them attached: `compose.yaml` and `env.example` (all settings, with
-`EVE_IMAGE` set to that release). These commands fetch them from the newest
+`ENI_IMAGE` set to that release). These commands fetch them from the newest
 release; save `env.example` as `.env`:
 
 ```bash
@@ -174,7 +176,7 @@ git clone https://github.com/michiel-zededa/eve-netboot-installer.git ~/eve-netb
    ```
 
 2. Check that compose reads what you meant. This prints the resolved
-   configuration; look at `EVE_BASE_URL`, `image:` and the volume `source:`
+   configuration; look at `ENI_BASE_URL`, `image:` and the volume `source:`
    paths:
 
    ```bash
@@ -258,11 +260,11 @@ Create two folders on the NAS, for example in a shared folder:
    ```sh
    # the NAS address, as the PXE clients see it
    SERVER_IP=192.168.1.10
-   EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
+   ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.2.1
    # data folder and import folder from step 3B
    DATA_DIR=/srv/data/eve-netboot
    IMPORT_DIR=/srv/iso/eve
-   EVE_IMPORT_LABEL=ISO share
+   ENI_IMPORT_LABEL=ISO share
    # change if 8080 is taken
    HTTP_PORT=8080
    ```
@@ -283,7 +285,7 @@ Points to watch on a NAS:
 - **Port 80:** many NAS web interfaces use port 80 themselves; keep `HTTP_PORT` on 8080 or another free port.
 - **One TFTP server:** only one service can use UDP 69. Stop any other PXE or TFTP service on the NAS first.
 - **Backups:** `DATA_DIR/www/eve/releases` holds the mirrored ISOs. You can exclude it from backups; it is downloaded again automatically.
-- **Own build instead of the image:** clone this repository on the NAS, set `EVE_SRC_DIR` to its absolute path and leave `EVE_IMAGE` empty.
+- **Own build instead of the image:** clone this repository on the NAS, set `ENI_SRC_DIR` to its absolute path and leave `ENI_IMAGE` empty.
 
 ---
 
@@ -331,7 +333,7 @@ If you only have x86_64 machines, `eve-x86_64.efi` for everyone is fine.
    minute on a gigabit network), the installer runs and, by default, reboots when done.
 
 Without a key press, the menu boots the local disk after 300 seconds
-(`EVE_MENU_TIMEOUT`).
+(`ENI_MENU_TIMEOUT`).
 
 ---
 
@@ -360,8 +362,8 @@ Without a key press, the menu boots the local disk after 300 seconds
 | Task | Do |
 |---|---|
 | Update | `docker compose pull && docker compose up -d` (or *Pull* + *Up* in the web UI) |
-| Stay on a version | `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.0.0` |
-| Roll back | set `EVE_IMAGE` to the previous version, then `docker compose up -d` |
+| Stay on a version | `ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.0.0` |
+| Roll back | set `ENI_IMAGE` to the previous version, then `docker compose up -d` |
 
 ### With your own build
 
@@ -393,7 +395,7 @@ Without a key press, the menu boots the local disk after 300 seconds
 | `tftp` container does not start: *address already in use* | Another TFTP or PXE service uses UDP 69: `sudo ss -lunp \| grep ':69 '`. |
 | iPXE starts but says *Could not load tftp://.../boot.ipxe* | `SERVER_IP` is not the address the clients reach. Fix it in `.env` and run `docker compose up -d`. |
 | Menu shows *(nothing synchronised yet)* | The first sync is still running or failed: `docker compose logs sync`. The host needs outbound HTTPS to `api.github.com`, `github.com` and `objects.githubusercontent.com`. |
-| `GitHub sync failed: HTTP Error 403` or `429` | Many API users behind the same public IP. Set `EVE_GITHUB_TOKEN` in `.env` (fine-grained token without permissions). |
+| `GitHub sync failed: HTTP Error 403` or `429` | Many API users behind the same public IP. Set `ENI_GITHUB_TOKEN` in `.env` (fine-grained token without permissions). |
 | Target hangs or reboots after *Loading installer ISO* | Not enough RAM: the whole ISO is held in memory. |
 | arm64 machine loads the x86 binary | DHCP gives everyone `eve-x86_64.efi`; use per-architecture rules ([step 5](#5-point-dhcp-at-the-server)). |
 | Status page not reachable | `HTTP_PORT` is taken or blocked: `docker compose ps` shows the port; try `curl -I http://localhost:8080/` on the host. |

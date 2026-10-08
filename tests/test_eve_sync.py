@@ -20,11 +20,11 @@ RELEASES = ["14.5.5-lts", "17.0.0-lts"]
 # eve_sync reads its configuration at import time
 TMP = tempfile.mkdtemp(prefix="eve-sync-test-")
 os.environ.update({
-    "EVE_ASSETS": os.path.join(TMP, "assets"),
-    "EVE_TFTP_DIR": os.path.join(TMP, "tftp"),
-    "EVE_IMPORT": os.path.join(TMP, "import"),
-    "EVE_BASE_URL": "http://192.0.2.10:8080",
-    "EVE_LANGUAGE": "en",
+    "ENI_ASSETS": os.path.join(TMP, "assets"),
+    "ENI_TFTP_DIR": os.path.join(TMP, "tftp"),
+    "ENI_IMPORT": os.path.join(TMP, "import"),
+    "ENI_BASE_URL": "http://192.0.2.10:8080",
+    "ENI_LANGUAGE": "en",
 })
 sys.path.insert(0, os.path.join(HERE, "..", "app"))
 import eve_sync  # noqa: E402
@@ -234,7 +234,7 @@ class MainLoopTest(unittest.TestCase):
         return m
 
     def test_interval_zero_keeps_watching_imports(self):
-        # regression: EVE_SYNC_INTERVAL=0 used to end the process after one cycle
+        # regression: ENI_SYNC_INTERVAL=0 used to end the process after one cycle
         m = self.run_loop(0)
         self.assertEqual(m["sync_github"].call_count, 1)
         self.assertEqual(m["sync_local"].call_count, 3)
@@ -294,7 +294,33 @@ class GithubTokenTest(unittest.TestCase):
         with open(os.path.join(HERE, "..", "compose.yaml")) as f:
             compose = f.read()
         self.assertNotRegex(compose, r"(?m)^\s*GITHUB_TOKEN:")
-        self.assertIn("EVE_GITHUB_TOKEN: ${EVE_GITHUB_TOKEN:-}", compose)
+        self.assertIn("ENI_GITHUB_TOKEN: ${ENI_GITHUB_TOKEN:-${EVE_GITHUB_TOKEN:-}}", compose)
+
+    def test_compose_keeps_old_names_working(self):
+        with open(os.path.join(HERE, "..", "compose.yaml")) as f:
+            compose = f.read()
+        uses = set(re.findall(r"\$\{ENI_([A-Z_]+):-", compose))
+        self.assertTrue(uses)
+        for name in uses:
+            self.assertIn("${ENI_%s:-${EVE_%s:-" % (name, name), compose)
+            self.assertIn("${EVE_%s:+EVE_%s }" % (name, name), compose)
+
+
+class OldNamesTest(unittest.TestCase):
+    """Settings were called EVE_* before 1.3; the old names keep working."""
+
+    def test_env_falls_back_to_old_name(self):
+        with mock.patch.dict(os.environ, {"EVE_SOMETHING": "old"}):
+            self.assertEqual(eve_sync._env("ENI_SOMETHING", "default"), "old")
+        with mock.patch.dict(os.environ, {"EVE_SOMETHING": "old", "ENI_SOMETHING": "new"}):
+            self.assertEqual(eve_sync._env("ENI_SOMETHING", "default"), "new")
+        self.assertEqual(eve_sync._env("ENI_SOMETHING", "default"), "default")
+
+    def test_legacy_names_reported(self):
+        env = {"ENI_LEGACY_NAMES": "EVE_LANGUAGE EVE_ARCHES ", "EVE_LTS_LINES": "2",
+               "EVE_DEFAULT_SERIAL": "ttyS0", "EVE_IMAGE": "x", "ENI_IMAGE": "y"}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(eve_sync.legacy_names(), ["EVE_ARCHES", "EVE_LANGUAGE", "EVE_LTS_LINES"])
 
 
 class HelpersTest(unittest.TestCase):

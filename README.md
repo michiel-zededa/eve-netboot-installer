@@ -133,7 +133,7 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
 The fastest way, with the prebuilt image. **[docs/deployment.md](docs/deployment.md)** is the full step-by-step guide, with checks after every step and example settings.
 
-Every [release](https://github.com/michiel-zededa/eve-netboot-installer/releases/latest) has `compose.yaml` and `env.example` (all settings, with `EVE_IMAGE` set to that release's image) attached:
+Every [release](https://github.com/michiel-zededa/eve-netboot-installer/releases/latest) has `compose.yaml` and `env.example` (all settings, with `ENI_IMAGE` set to that release's image) attached:
 
 ```bash
 mkdir -p ~/eve-netboot && cd ~/eve-netboot
@@ -159,7 +159,7 @@ Then:
 2. **Open the status page** at `http://SERVER_IP:8080/` and wait for the first sync to finish.
 3. **Boot a machine:** network boot it, pick a release, review the options and press **`i`**.
 
-To build the image yourself instead, clone the repository, leave `EVE_IMAGE` empty and run `docker compose up -d --build` (the first build takes about 5 minutes).
+To build the image yourself instead, clone the repository, leave `ENI_IMAGE` empty and run `docker compose up -d --build` (the first build takes about 5 minutes).
 
 > [!WARNING]
 > The EVE installer wipes the target disk without further confirmation. The menu always shows a summary first and only installs after **`i`** is pressed.
@@ -174,7 +174,13 @@ To build the image yourself instead, clone the repository, leave `EVE_IMAGE` emp
 
 ## Configuration
 
-Everything is configured in `.env`; [.env.example](.env.example) documents every option. The most important ones:
+Everything is configured in `.env`; [.env.example](.env.example) documents every option.
+
+- **`ENI_*`:** settings of EVE-Netboot-Installer itself (language, what to mirror, menu, image).
+- **`EVE_DEFAULT_*`:** defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
+- **Before 1.3** the `ENI_*` settings were called `EVE_*` (`EVE_LANGUAGE`, `EVE_ARCHES`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
+
+The most important ones:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -182,15 +188,15 @@ Everything is configured in `.env`; [.env.example](.env.example) documents every
 | `HTTP_PORT` | `8080` | HTTP port for the menu, files and status page |
 | `DATA_DIR` | `./data` | Mirror, menu and TFTP files |
 | `IMPORT_DIR` | `./import` | Folder scanned for your own installer ISOs |
-| `EVE_LANGUAGE` | `en` | `en` `de` `fr` `es` `pt` `nl` `da` `no` |
-| `EVE_ARCHES` | `amd64` | `amd64`, `arm64` or both |
-| `EVE_FLAVOURS` | `kvm` | `kvm`, `k` or both |
-| `EVE_LTS_LINES` | `3` | Number of LTS lines to mirror |
-| `EVE_MENU_TIMEOUT` | `300` | Seconds until the menu boots the local disk (`0` = wait) |
-| `EVE_MENU_MODE` | `standalone` | `chained` when called from another iPXE menu (exit returns to that menu instead of the local disk) |
+| `ENI_LANGUAGE` | `en` | `en` `de` `fr` `es` `pt` `nl` `da` `no` |
+| `ENI_ARCHES` | `amd64` | `amd64`, `arm64` or both |
+| `ENI_FLAVOURS` | `kvm` | `kvm`, `k` or both |
+| `ENI_LTS_LINES` | `3` | Number of LTS lines to mirror |
+| `ENI_MENU_TIMEOUT` | `300` | Seconds until the menu boots the local disk (`0` = wait) |
+| `ENI_MENU_MODE` | `standalone` | `chained` when called from another iPXE menu (exit returns to that menu instead of the local disk) |
 | `EVE_DEFAULT_*` | | Default values of the installation options (disk, persist disk, controller, serial console, …) |
 | `IPXE_ALIASES_X86_64` | | Extra file names for the iPXE binary, to match a boot file name your DHCP already hands out |
-| `EVE_GITHUB_TOKEN` | | Optional; raises the GitHub API rate limit (formerly `GITHUB_TOKEN`) |
+| `ENI_GITHUB_TOKEN` | | Optional; raises the GitHub API rate limit (formerly `EVE_GITHUB_TOKEN`, before that `GITHUB_TOKEN`) |
 
 Apply changes with `docker compose up -d`. The menu is regenerated on every start. [docs/deployment.md](docs/deployment.md#2-choose-your-settings) has ready-made examples for common setups.
 
@@ -234,7 +240,7 @@ The status page (`http://SERVER_IP:HTTP_PORT/`) links to the generated menu (`/e
 
 ## Languages
 
-Set `EVE_LANGUAGE` to one of the languages below:
+Set `ENI_LANGUAGE` to one of the languages below:
 
 | Code | Language |
 |---|---|

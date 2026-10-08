@@ -4,6 +4,9 @@
 #   LTS releases (mirrored locally) plus your own installer ISOs.
 #
 #   All settings live in .env  ->  cp .env.example .env  and set SERVER_IP.
+#   Settings of the installer itself start with ENI_; EVE_DEFAULT_* are the
+#   defaults of EVE-OS's installation options. The pre-1.3 names (EVE_LANGUAGE
+#   instead of ENI_LANGUAGE, ...) still work.
 #   Then:  docker compose up -d   (builds the image on first start, ~5 min)
 #
 #   Services (one image, three roles):
@@ -12,9 +15,9 @@
 #     web   serves the menu, kernels, ISOs and a status page over HTTP
 # ---------------------------------------------------------------------------
 x-service: &service
-  image: ${EVE_IMAGE:-eve-netboot-installer:latest}
+  image: ${ENI_IMAGE:-${EVE_IMAGE:-eve-netboot-installer:latest}}
   build:
-    context: ${EVE_SRC_DIR:-.}
+    context: ${ENI_SRC_DIR:-${EVE_SRC_DIR:-.}}
     args:
       IPXE_VERSION: ${IPXE_VERSION:-v2.0.0}
   init: true
@@ -26,20 +29,23 @@ services:
     command: sync
     environment:
       TZ: ${TZ:-UTC}
-      EVE_BASE_URL: http://${SERVER_IP:?set SERVER_IP in .env}:${HTTP_PORT:-8080}
-      EVE_LANGUAGE: ${EVE_LANGUAGE:-en}
-      EVE_MENU_MODE: ${EVE_MENU_MODE:-standalone}
-      EVE_MENU_TIMEOUT: ${EVE_MENU_TIMEOUT:-}
-      EVE_ARCHES: ${EVE_ARCHES:-amd64}
-      EVE_FLAVOURS: ${EVE_FLAVOURS:-kvm}
-      EVE_LTS_LINES: ${EVE_LTS_LINES:-3}
-      EVE_SYNC_INTERVAL: ${EVE_SYNC_INTERVAL:-86400}
-      EVE_IMPORT_INTERVAL: ${EVE_IMPORT_INTERVAL:-60}
-      EVE_IMPORT_LABEL: ${EVE_IMPORT_LABEL:-}
-      EVE_GITHUB_REPO: ${EVE_GITHUB_REPO:-lf-edge/eve}
+      ENI_BASE_URL: http://${SERVER_IP:?set SERVER_IP in .env}:${HTTP_PORT:-8080}
+      ENI_LANGUAGE: ${ENI_LANGUAGE:-${EVE_LANGUAGE:-en}}
+      ENI_MENU_MODE: ${ENI_MENU_MODE:-${EVE_MENU_MODE:-standalone}}
+      ENI_MENU_TIMEOUT: ${ENI_MENU_TIMEOUT:-${EVE_MENU_TIMEOUT:-}}
+      ENI_ARCHES: ${ENI_ARCHES:-${EVE_ARCHES:-amd64}}
+      ENI_FLAVOURS: ${ENI_FLAVOURS:-${EVE_FLAVOURS:-kvm}}
+      ENI_LTS_LINES: ${ENI_LTS_LINES:-${EVE_LTS_LINES:-3}}
+      ENI_SYNC_INTERVAL: ${ENI_SYNC_INTERVAL:-${EVE_SYNC_INTERVAL:-86400}}
+      ENI_IMPORT_INTERVAL: ${ENI_IMPORT_INTERVAL:-${EVE_IMPORT_INTERVAL:-60}}
+      ENI_IMPORT_LABEL: ${ENI_IMPORT_LABEL:-${EVE_IMPORT_LABEL:-}}
+      ENI_GITHUB_REPO: ${ENI_GITHUB_REPO:-${EVE_GITHUB_REPO:-lf-edge/eve}}
       # optional; deliberately not GITHUB_TOKEN, which compose would also take from the shell
-      EVE_GITHUB_TOKEN: ${EVE_GITHUB_TOKEN:-}
-      EVE_LEGACY_GITHUB_TOKEN: ${GITHUB_TOKEN:+set}
+      ENI_GITHUB_TOKEN: ${ENI_GITHUB_TOKEN:-${EVE_GITHUB_TOKEN:-}}
+      ENI_LEGACY_GITHUB_TOKEN: ${GITHUB_TOKEN:+set}
+      # names of settings still set with their pre-1.3 EVE_ name (the values are
+      # used through the fallbacks above); the sync log asks to rename them
+      ENI_LEGACY_NAMES: "${EVE_IMAGE:+EVE_IMAGE }${EVE_SRC_DIR:+EVE_SRC_DIR }${EVE_LANGUAGE:+EVE_LANGUAGE }${EVE_MENU_MODE:+EVE_MENU_MODE }${EVE_MENU_TIMEOUT:+EVE_MENU_TIMEOUT }${EVE_ARCHES:+EVE_ARCHES }${EVE_FLAVOURS:+EVE_FLAVOURS }${EVE_LTS_LINES:+EVE_LTS_LINES }${EVE_SYNC_INTERVAL:+EVE_SYNC_INTERVAL }${EVE_IMPORT_INTERVAL:+EVE_IMPORT_INTERVAL }${EVE_IMPORT_LABEL:+EVE_IMPORT_LABEL }${EVE_GITHUB_REPO:+EVE_GITHUB_REPO }${EVE_GITHUB_TOKEN:+EVE_GITHUB_TOKEN }"
       EVE_DEFAULT_REBOOT: ${EVE_DEFAULT_REBOOT:-1}
       EVE_DEFAULT_SOFT_SERIAL: ${EVE_DEFAULT_SOFT_SERIAL:-1}
       EVE_DEFAULT_NUKE_ALL_DISKS: ${EVE_DEFAULT_NUKE_ALL_DISKS:-0}

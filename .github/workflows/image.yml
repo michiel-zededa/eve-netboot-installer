@@ -1,8 +1,8 @@
 # Builds the multi-arch image and publishes it to GitHub Container Registry:
 #   ghcr.io/<owner>/<repo>:latest   (default branch)
 #   ghcr.io/<owner>/<repo>:<tag>    (git tags like v1.2.3)
-# Users can then set EVE_IMAGE=ghcr.io/<owner>/<repo>:latest instead of building.
-# For v* tags it also attaches compose.yaml + env.example (EVE_IMAGE pinned to
+# Users can then set ENI_IMAGE=ghcr.io/<owner>/<repo>:latest instead of building.
+# For v* tags it also attaches compose.yaml + env.example (ENI_IMAGE pinned to
 # the version) and the VM appliance images (qcow2 amd64/arm64, VMDK/OVA amd64)
 # to the release.
 name: image
@@ -50,7 +50,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---- Docker Compose files for this release: compose.yaml and a complete
-  # env.example with EVE_IMAGE pinned to this version (no leading dot: GitHub
+  # env.example with ENI_IMAGE pinned to this version (no leading dot: GitHub
   # renames assets that start with one). Separate from the VM jobs, so they
   # are attached even when a VM build fails.
   compose-assets:
@@ -67,8 +67,8 @@ jobs:
       - name: Attach compose.yaml and env.example to the release
         run: |
           mkdir -p dist && cp compose.yaml dist/
-          sed "s|^EVE_IMAGE=.*|EVE_IMAGE=ghcr.io/${GITHUB_REPOSITORY}:${TAG#v}|" .env.example > dist/env.example
-          grep -q "^EVE_IMAGE=ghcr.io/${GITHUB_REPOSITORY}:${TAG#v}$" dist/env.example
+          sed "s|^ENI_IMAGE=.*|ENI_IMAGE=ghcr.io/${GITHUB_REPOSITORY}:${TAG#v}|" .env.example > dist/env.example
+          grep -q "^ENI_IMAGE=ghcr.io/${GITHUB_REPOSITORY}:${TAG#v}$" dist/env.example
           (cd dist && cp env.example .env && docker compose config -q && rm .env)
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes

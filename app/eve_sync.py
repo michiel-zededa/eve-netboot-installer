@@ -40,8 +40,20 @@ import urllib.request
 
 
 def _env(name, default=""):
+    """ENI_* settings were called EVE_* before 1.3; the old name still works."""
     v = os.environ.get(name)
+    if (v is None or v.strip() == "") and name.startswith("ENI_"):
+        v = os.environ.get("EVE_" + name[4:])
     return default if v is None or v.strip() == "" else v.strip()
+
+
+def legacy_names():
+    """Settings still given with their pre-1.3 EVE_* name (directly, or as
+    reported by compose in ENI_LEGACY_NAMES)."""
+    names = set(_env("ENI_LEGACY_NAMES").split())
+    names |= {k for k in os.environ if k.startswith("EVE_") and not k.startswith("EVE_DEFAULT_")
+              and os.environ.get("ENI_" + k[4:]) in (None, "")}
+    return sorted(names)
 
 
 def _env_int(name, default):
@@ -59,35 +71,35 @@ def _env_bool(name, default):
 # --------------------------------------------------------------------------
 # configuration (see .env.example for documentation)
 # --------------------------------------------------------------------------
-ASSETS = _env("EVE_ASSETS", "/assets")
+ASSETS = _env("ENI_ASSETS", "/assets")
 EVE_ROOT = os.path.join(ASSETS, "eve")
 REL_ROOT = os.path.join(EVE_ROOT, "releases")
 LOC_ROOT = os.path.join(EVE_ROOT, "local")
 STATE_FILE = os.path.join(EVE_ROOT, "sync-state.json")
-IMPORT_DIR = _env("EVE_IMPORT", "/import")
-TFTP_DIR = _env("EVE_TFTP_DIR", "/tftp")
-IMPORT_LABEL = _env("EVE_IMPORT_LABEL", "")
+IMPORT_DIR = _env("ENI_IMPORT", "/import")
+TFTP_DIR = _env("ENI_TFTP_DIR", "/tftp")
+IMPORT_LABEL = _env("ENI_IMPORT_LABEL", "")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_URL = _env("EVE_BASE_URL").rstrip("/")
-ARCHES = _env("EVE_ARCHES", "amd64").split()
-FLAVOURS = _env("EVE_FLAVOURS", "kvm").split()
-LTS_LINES = _env_int("EVE_LTS_LINES", 3)
-SYNC_INTERVAL = _env_int("EVE_SYNC_INTERVAL", 86400)
-IMPORT_INTERVAL = _env_int("EVE_IMPORT_INTERVAL", 60)
-REPO = _env("EVE_GITHUB_REPO", "lf-edge/eve")
-# EVE_GITHUB_TOKEN, not GITHUB_TOKEN, in compose: a GITHUB_TOKEN exported in the
+BASE_URL = _env("ENI_BASE_URL").rstrip("/")
+ARCHES = _env("ENI_ARCHES", "amd64").split()
+FLAVOURS = _env("ENI_FLAVOURS", "kvm").split()
+LTS_LINES = _env_int("ENI_LTS_LINES", 3)
+SYNC_INTERVAL = _env_int("ENI_SYNC_INTERVAL", 86400)
+IMPORT_INTERVAL = _env_int("ENI_IMPORT_INTERVAL", 60)
+REPO = _env("ENI_GITHUB_REPO", "lf-edge/eve")
+# ENI_GITHUB_TOKEN, not GITHUB_TOKEN, in compose: a GITHUB_TOKEN exported in the
 # shell that runs "docker compose up" would otherwise end up in the container.
 # GITHUB_TOKEN still works for plain "docker run -e".
-TOKEN = _env("EVE_GITHUB_TOKEN") or _env("GITHUB_TOKEN")
+TOKEN = _env("ENI_GITHUB_TOKEN") or _env("GITHUB_TOKEN")
 # compose sets this to "set" when GITHUB_TOKEN exists where compose runs (value not passed)
-LEGACY_TOKEN_SEEN = _env("EVE_LEGACY_GITHUB_TOKEN") == "set"
+LEGACY_TOKEN_SEEN = _env("ENI_LEGACY_GITHUB_TOKEN") == "set"
 API_HOST = "api.github.com"
-LANGUAGE = _env("EVE_LANGUAGE", "en").lower()
+LANGUAGE = _env("ENI_LANGUAGE", "en").lower()
 # standalone: this menu is the top level (exit = boot local disk);
 # chained:    the menu is chained from another iPXE menu (exit = go back)
-MENU_MODE = _env("EVE_MENU_MODE", "standalone").lower()
+MENU_MODE = _env("ENI_MENU_MODE", "standalone").lower()
 STANDALONE = MENU_MODE != "chained"
-MENU_TIMEOUT = _env_int("EVE_MENU_TIMEOUT", 300 if STANDALONE else 0)
+MENU_TIMEOUT = _env_int("ENI_MENU_TIMEOUT", 300 if STANDALONE else 0)
 
 # defaults of the installation options in the iPXE menu
 SERIAL_CHOICES = ("none", "ttyS0", "ttyS1", "ttyAMA0")
@@ -127,7 +139,7 @@ def load_texts(lang):
             with open(path, encoding="utf-8") as f:
                 texts.update({k: v for k, v in json.load(f).items() if v})
         else:
-            print(f"EVE_LANGUAGE={lang}: no {path}, falling back to English", flush=True)
+            print(f"ENI_LANGUAGE={lang}: no {path}, falling back to English", flush=True)
     return texts
 
 
@@ -1047,15 +1059,19 @@ def write_menus():
 # --------------------------------------------------------------------------
 def main():
     if not BASE_URL:
-        log("EVE_BASE_URL is not set (e.g. http://192.168.1.10:8080) - aborting")
+        log("ENI_BASE_URL is not set (e.g. http://192.168.1.10:8080) - aborting")
         sys.exit(2)
     if shutil.which("bsdtar") is None:
         log("bsdtar not found (install libarchive-tools) - aborting")
         sys.exit(2)
     os.makedirs(EVE_ROOT, exist_ok=True)
+    old = legacy_names()
+    if old:
+        log("these settings still use their old name (it keeps working): " + " ".join(old)
+            + " - rename EVE_ to ENI_ in .env, e.g. EVE_LANGUAGE -> ENI_LANGUAGE")
     if LEGACY_TOKEN_SEEN and not TOKEN:
         log("GITHUB_TOKEN is set where docker compose runs, but is no longer passed to the "
-            "container; set EVE_GITHUB_TOKEN in .env to use a token (GitHub is queried anonymously)")
+            "container; set ENI_GITHUB_TOKEN in .env to use a token (GitHub is queried anonymously)")
     log(f"eve-sync start: arches={ARCHES} flavours={FLAVOURS} lts_lines={LTS_LINES} "
         f"base={BASE_URL} import={IMPORT_DIR} language={LANGUAGE} mode={MENU_MODE}")
     once = "--once" in sys.argv
@@ -1066,7 +1082,7 @@ def main():
             if time.time() >= next_gh:
                 try:
                     sync_github()
-                    # EVE_SYNC_INTERVAL=0: GitHub only at start, the import folder is still watched
+                    # ENI_SYNC_INTERVAL=0: GitHub only at start, the import folder is still watched
                     next_gh = time.time() + SYNC_INTERVAL if SYNC_INTERVAL > 0 else float("inf")
                 except Exception as e:  # noqa: BLE001
                     log(f"GitHub sync failed: {e}; retry in 1h")

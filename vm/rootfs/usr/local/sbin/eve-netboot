@@ -45,7 +45,7 @@ import urllib.request
 # --------------------------------------------------------------------------
 # paths and constants
 # --------------------------------------------------------------------------
-ETC = os.environ.get("EVE_NETBOOT_ETC", "/etc/eve-netboot")
+ETC = os.environ.get("ENI_ETC", "/etc/eve-netboot")
 SETTINGS = os.path.join(ETC, "settings.env")
 CONFIGURED = os.path.join(ETC, ".configured")
 KEYS_DIR = os.path.join(ETC, "authorized_keys")
@@ -78,9 +78,9 @@ VM_KEYS = {"HOSTNAME", "NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY"
 # applied once and never stored
 CONSUMED = {"ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "SMB_PASSWORD"}
 # not in an export (secrets)
-NOT_EXPORTED = CONSUMED | {"EVE_GITHUB_TOKEN", "GITHUB_TOKEN"}
+NOT_EXPORTED = CONSUMED | {"ENI_GITHUB_TOKEN", "GITHUB_TOKEN"}
 # fixed by the appliance; ignored when set
-FIXED = {"DATA_DIR", "IMPORT_DIR", "EVE_SRC_DIR", "SERVER_IP_DETECTED"}
+FIXED = {"DATA_DIR", "IMPORT_DIR", "ENI_SRC_DIR", "SERVER_IP_DETECTED"}
 
 DEFAULTS = {
     "HOSTNAME": "eve-netboot",
@@ -90,14 +90,29 @@ DEFAULTS = {
     "SERVER_IP": "auto",
     "HTTP_PORT": "8080",
     "TZ": "UTC",
-    "EVE_LANGUAGE": "en",
-    "EVE_ARCHES": "amd64",
-    "EVE_FLAVOURS": "kvm",
-    "EVE_LTS_LINES": "3",
-    "EVE_IMPORT_LABEL": "import share",
+    "ENI_LANGUAGE": "en",
+    "ENI_ARCHES": "amd64",
+    "ENI_FLAVOURS": "kvm",
+    "ENI_LTS_LINES": "3",
+    "ENI_IMPORT_LABEL": "import share",
 }
 
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+# settings of the installer itself were called EVE_* before 1.3 (EVE_DEFAULT_*,
+# the defaults of EVE-OS's installation options, keep their name)
+RENAMED = {f"EVE_{n}": f"ENI_{n}" for n in (
+    "IMAGE", "SRC_DIR", "LANGUAGE", "MENU_MODE", "MENU_TIMEOUT", "ARCHES", "FLAVOURS", "LTS_LINES",
+    "SYNC_INTERVAL", "IMPORT_INTERVAL", "IMPORT_LABEL", "GITHUB_REPO", "GITHUB_TOKEN")}
+
+
+def migrate(settings):
+    """Old EVE_* names -> ENI_*; when both are given, the new name wins."""
+    out = {k: v for k, v in settings.items() if k not in RENAMED}
+    for old, new in RENAMED.items():
+        if old in settings and new not in settings:
+            out[new] = settings[old]
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -123,7 +138,7 @@ def parse_env(text):
         else:
             value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
         out[key] = value
-    return out
+    return migrate(out)
 
 
 def parse_user_data(text):
@@ -151,7 +166,7 @@ def parse_user_data(text):
             k = str(k).strip().upper()
             if KEY_RE.match(k) and v is not None:
                 out[k] = ("yes" if v else "no") if isinstance(v, bool) else str(v).strip()
-        return out or None
+        return migrate(out) or None
     if first.startswith("#!") or first.lower().startswith("content-type") or first.startswith("#include"):
         return None
     return parse_env(text) or None
@@ -212,14 +227,14 @@ def validate(s):
     for k in ("SSH_PASSWORD_LOGIN", "SMB_IMPORT_SHARE"):
         if get(s, k) not in ("yes", "no"):
             errors.append(f"{k} must be yes or no")
-    if get(s, "EVE_LANGUAGE") not in dict(LANGUAGES):
-        errors.append("EVE_LANGUAGE must be one of " + " ".join(dict(LANGUAGES)))
-    if not set(get(s, "EVE_ARCHES").split()) <= {"amd64", "arm64"} or not get(s, "EVE_ARCHES").split():
-        errors.append("EVE_ARCHES must be amd64, arm64 or both")
-    if not set(get(s, "EVE_FLAVOURS").split()) <= {"kvm", "k"} or not get(s, "EVE_FLAVOURS").split():
-        errors.append("EVE_FLAVOURS must be kvm, k or both")
-    if not get(s, "EVE_LTS_LINES").isdigit():
-        errors.append("EVE_LTS_LINES must be a number")
+    if get(s, "ENI_LANGUAGE") not in dict(LANGUAGES):
+        errors.append("ENI_LANGUAGE must be one of " + " ".join(dict(LANGUAGES)))
+    if not set(get(s, "ENI_ARCHES").split()) <= {"amd64", "arm64"} or not get(s, "ENI_ARCHES").split():
+        errors.append("ENI_ARCHES must be amd64, arm64 or both")
+    if not set(get(s, "ENI_FLAVOURS").split()) <= {"kvm", "k"} or not get(s, "ENI_FLAVOURS").split():
+        errors.append("ENI_FLAVOURS must be kvm, k or both")
+    if not get(s, "ENI_LTS_LINES").isdigit():
+        errors.append("ENI_LTS_LINES must be a number")
     serial = s.get("EVE_DEFAULT_SERIAL", "")
     if serial and serial not in SERIALS:
         errors.append("EVE_DEFAULT_SERIAL must be one of " + " ".join(SERIALS))
@@ -256,10 +271,10 @@ def render_export(s):
 def render_stack_env(s, server_ip, image):
     """The stack's .env: application settings plus the appliance's fixed values."""
     app = {k: v for k, v in s.items() if k not in VM_KEYS and k not in FIXED and v != ""}
-    for k in ("HTTP_PORT", "TZ", "EVE_LANGUAGE", "EVE_ARCHES", "EVE_FLAVOURS", "EVE_LTS_LINES",
-              "EVE_IMPORT_LABEL"):
+    for k in ("HTTP_PORT", "TZ", "ENI_LANGUAGE", "ENI_ARCHES", "ENI_FLAVOURS", "ENI_LTS_LINES",
+              "ENI_IMPORT_LABEL"):
         app.setdefault(k, DEFAULTS[k])
-    app.update({"SERVER_IP": server_ip, "DATA_DIR": DATA, "IMPORT_DIR": IMPORT, "EVE_IMAGE": image})
+    app.update({"SERVER_IP": server_ip, "DATA_DIR": DATA, "IMPORT_DIR": IMPORT, "ENI_IMAGE": image})
     lines = ["# generated by eve-netboot from " + SETTINGS + " - do not edit"]
     lines += [f"{k}='{app[k]}'" for k in sorted(app)]
     return "\n".join(lines) + "\n"
@@ -371,7 +386,7 @@ def version():
 
 
 def current_image(s):
-    return get(s, "EVE_IMAGE") or read(os.path.join(STATE, "image")).strip() or f"{IMAGE_REPO}:{version()}"
+    return get(s, "ENI_IMAGE") or read(os.path.join(STATE, "image")).strip() or f"{IMAGE_REPO}:{version()}"
 
 
 def ipv4_addresses():
@@ -733,8 +748,8 @@ def latest_release():
 def update_app(say=print):
     """Newest release: pull image + compose.yaml, check health, roll back on failure."""
     s = load_settings()
-    if s.get("EVE_IMAGE"):
-        return False, f"EVE_IMAGE is set to {s['EVE_IMAGE']} in the settings; remove it to use app updates."
+    if s.get("ENI_IMAGE"):
+        return False, f"ENI_IMAGE is set to {s['ENI_IMAGE']} in the settings; remove it to use app updates."
     tag = latest_release()
     target = f"{IMAGE_REPO}:{tag.lstrip('v')}"
     old_image = current_image(s)
@@ -921,8 +936,8 @@ def screen_server_ip(s):
 
 def screen_language(s):
     s = dict(s)
-    s["EVE_LANGUAGE"] = choose("Language", "Language of the boot menu and the status page:",
-                               LANGUAGES, default=get(s, "EVE_LANGUAGE"))
+    s["ENI_LANGUAGE"] = choose("Language", "Language of the boot menu and the status page:",
+                               LANGUAGES, default=get(s, "ENI_LANGUAGE"))
     return s
 
 
@@ -930,25 +945,25 @@ def screen_mirror(s):
     s = dict(s)
     while True:
         arches = checklist("Mirror", "Which architectures do your machines have?\n(Space selects, Enter continues)",
-                           [("amd64", "x86_64 (Intel/AMD)"), ("arm64", "ARM 64-bit")], get(s, "EVE_ARCHES").split())
+                           [("amd64", "x86_64 (Intel/AMD)"), ("arm64", "ARM 64-bit")], get(s, "ENI_ARCHES").split())
         if arches:
             break
         msg("Mirror", "Select at least one architecture.")
-    s["EVE_ARCHES"] = " ".join(arches)
+    s["ENI_ARCHES"] = " ".join(arches)
     while True:
         flav = checklist("Mirror", "Which EVE-OS variants?",
                          [("kvm", "kvm - the standard variant"),
                           ("k", "k - with Kubernetes, needs >= 8 GB RAM on the target")],
-                         get(s, "EVE_FLAVOURS").split())
+                         get(s, "ENI_FLAVOURS").split())
         if flav:
             break
         msg("Mirror", "Select at least one variant.")
-    s["EVE_FLAVOURS"] = " ".join(flav)
+    s["ENI_FLAVOURS"] = " ".join(flav)
     while True:
         n = ask("Mirror", "How many EVE-OS LTS release lines should be mirrored?\n"
-                "(each line is about 0.5 GB per architecture and variant)", get(s, "EVE_LTS_LINES"))
+                "(each line is about 0.5 GB per architecture and variant)", get(s, "ENI_LTS_LINES"))
         if n.isdigit() and 1 <= int(n) <= 10:
-            s["EVE_LTS_LINES"] = n
+            s["ENI_LTS_LINES"] = n
             return s
         msg("Mirror", "Enter a number from 1 to 10.")
 
@@ -991,12 +1006,12 @@ def screen_advanced(s):
         try:
             c = choose("Advanced", "Change a setting (Back when done, then the changes are applied):", [
             ("HTTP_PORT", f"HTTP port of the status page and menu   [{get(s, 'HTTP_PORT')}]"),
-            ("EVE_MENU_TIMEOUT", f"Boot menu timeout in seconds           [{s.get('EVE_MENU_TIMEOUT') or '300'}]"),
+            ("ENI_MENU_TIMEOUT", f"Boot menu timeout in seconds           [{s.get('ENI_MENU_TIMEOUT') or '300'}]"),
             ("HOSTNAME", f"Host name of this VM                   [{get(s, 'HOSTNAME')}]"),
             ("TZ", f"Time zone                              [{get(s, 'TZ')}]"),
             ("SSH_PASSWORD_LOGIN", f"SSH login with password                [{get(s, 'SSH_PASSWORD_LOGIN')}]"),
             ("ADMIN_SSH_KEYS", f"SSH public keys for {ADMIN}              [{len(get(s, 'ADMIN_SSH_KEYS').split(';')) if get(s, 'ADMIN_SSH_KEYS') else 0}]"),
-            ("EVE_GITHUB_TOKEN", f"GitHub token (only for API limits)     [{'set' if s.get('EVE_GITHUB_TOKEN') else 'none'}]"),
+            ("ENI_GITHUB_TOKEN", f"GitHub token (only for API limits)     [{'set' if s.get('ENI_GITHUB_TOKEN') else 'none'}]"),
             ("edit", "Edit the settings file (all settings, for experts)"),
             ], cancel="Back")
         except Cancel:
@@ -1015,7 +1030,7 @@ def screen_advanced(s):
             s[c] = ask("Advanced", "SSH public key(s), several separated by ';':", get(s, c), cancel="Cancel")
             continue
         hint = {"TZ": "Time zone, e.g. Europe/Amsterdam or UTC:",
-                "EVE_MENU_TIMEOUT": "Seconds before the boot menu boots the local disk (0 = wait forever):"}
+                "ENI_MENU_TIMEOUT": "Seconds before the boot menu boots the local disk (0 = wait forever):"}
         try:
             value = ask("Advanced", hint.get(c, f"New value for {c}:"), s.get(c) or get(s, c), cancel="Cancel")
         except Cancel:
@@ -1025,7 +1040,7 @@ def screen_advanced(s):
         errors = validate(s)
         if c == "TZ" and not os.path.exists(os.path.join("/usr/share/zoneinfo", value)):
             errors.append("unknown time zone")
-        if c == "EVE_MENU_TIMEOUT" and value and not value.isdigit():
+        if c == "ENI_MENU_TIMEOUT" and value and not value.isdigit():
             errors.append("the timeout must be a number")
         if errors:
             msg("Advanced", "\n".join(errors))
@@ -1041,8 +1056,8 @@ def summary(s):
     return "\n".join([
         f"Network          {net}",
         f"Server address   {'this VM (' + (primary_ip() or '?') + ')' if get(s, 'SERVER_IP') == 'auto' else get(s, 'SERVER_IP')}",
-        f"Language         {dict(LANGUAGES)[get(s, 'EVE_LANGUAGE')]}",
-        f"Mirror           {get(s, 'EVE_LTS_LINES')} LTS lines, {get(s, 'EVE_ARCHES')}, {get(s, 'EVE_FLAVOURS')}",
+        f"Language         {dict(LANGUAGES)[get(s, 'ENI_LANGUAGE')]}",
+        f"Mirror           {get(s, 'ENI_LTS_LINES')} LTS lines, {get(s, 'ENI_ARCHES')}, {get(s, 'ENI_FLAVOURS')}",
         f"Controller       {s.get('EVE_DEFAULT_INSTALL_SERVER') or 'from the ISO'}",
         f"Serial console   {s.get('EVE_DEFAULT_SERIAL') or 'none'}",
         f"Import share     {'yes' if get(s, 'SMB_IMPORT_SHARE') == 'yes' else 'no'}",
@@ -1261,8 +1276,8 @@ def console():
         if menu() == 10:
             print("\033[2J\033[HType 'exit' to return to the status screen, 'eve-netboot menu' for the menu.\n",
                   flush=True)
-            subprocess.run(["su", "-w", "EVE_NETBOOT_NO_MENU", "-", ADMIN],
-                           env=dict(os.environ, EVE_NETBOOT_NO_MENU="1"))
+            subprocess.run(["su", "-w", "ENI_NO_MENU", "-", ADMIN],
+                           env=dict(os.environ, ENI_NO_MENU="1"))
 
 
 def wait_enter(seconds):

@@ -89,7 +89,7 @@ echo eve-netboot > /etc/hostname
 printf '127.0.0.1\tlocalhost\n127.0.1.1\teve-netboot\n::1\t\tlocalhost ip6-localhost ip6-loopback\nff02::1\t\tip6-allnodes\nff02::2\t\tip6-allrouters\n' > /etc/hosts
 
 # ---- check the stack definition with the installed compose version
-printf 'SERVER_IP=192.0.2.1\nEVE_IMAGE=%s\nDATA_DIR=/srv/eve-netboot\nIMPORT_DIR=/srv/eve-netboot/import\n' "$IMAGE" > /tmp/check.env
+printf 'SERVER_IP=192.0.2.1\nENI_IMAGE=%s\nDATA_DIR=/srv/eve-netboot\nIMPORT_DIR=/srv/eve-netboot/import\n' "$IMAGE" > /tmp/check.env
 docker compose --project-directory /opt/eve-netboot --env-file /tmp/check.env config -q
 rm -f /tmp/check.env
 /usr/local/sbin/eve-netboot help >/dev/null
