@@ -487,6 +487,11 @@ class Lock:
 # apply
 # --------------------------------------------------------------------------
 def apply_network(s):
+    if get(s, "NET_MODE") == "static" and not get(s, "NET_INTERFACE"):
+        # a fixed address belongs on one adapter: the first one; others keep DHCP
+        links = sorted(n for n in os.listdir("/sys/class/net") if re.match(r"^(en|eth)", n))
+        if links:
+            s = {**s, "NET_INTERFACE": links[0]}
     static, dhcp = render_networkd(s)
     changed = write(NET_DHCP, dhcp)
     if static:

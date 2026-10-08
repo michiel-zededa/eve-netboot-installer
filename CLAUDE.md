@@ -35,7 +35,9 @@ vm/build/build.sh --arch arm64 --version dev --image ghcr.io/michiel-zededa/eve-
 ```
 
 The appliance tests (`tests/test_appliance.py`) need PyYAML for the
-#cloud-config cases; without it those are skipped.
+#cloud-config cases; without it those are skipped. They also check that
+`vm/examples/eve-netboot.env` and `cloud-config.yaml` mention every setting
+of `.env.example` and of the appliance: add new settings there too.
 
 CI (`.github/workflows/test.yml`) also runs `ruff check app tests deploy`
 (config in `ruff.toml`) and `shellcheck --severity=warning` on the shell scripts.

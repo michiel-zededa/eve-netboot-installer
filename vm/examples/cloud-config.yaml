@@ -1,22 +1,99 @@
 #cloud-config
-# EVE-Netboot-Installer VM - settings as a #cloud-config
+# ===========================================================================
+# EVE-Netboot-Installer VM - settings reference (#cloud-config syntax)
 #
-# The "eve_netboot:" section takes the same settings as settings.txt. The rest
-# is standard cloud-init and applies to the user "admin".
+# Use this file as the cloud-init user-data of the VM. The first line must be
+# exactly "#cloud-config". Two kinds of content:
+#
+#   eve_netboot:      the appliance settings; the same names and values as
+#                     in eve-netboot.env (see that file for every setting)
+#   everything else   standard cloud-init; user settings apply to "admin"
+#
+# YAML syntax
+#   - indent with spaces (two per level), never with tabs
+#   - "KEY: value" with a space after the colon
+#   - quote values YAML could misread: anything with ": " or " #", values
+#     starting with * & ! [ { > | @ ` or %, and "yes"/"no"/"on"/"off" when you
+#     mean the text (for SSH_PASSWORD_LOGIN and SMB_IMPORT_SHARE both work)
+#   - lists: one "- item" per line
+#
+# Lines that are not commented out show the DEFAULT values, so this file as
+# it is gives a working VM with DHCP. Uncomment and change what you need.
+# ===========================================================================
 
 eve_netboot:
-  SERVER_IP: auto
+  # ----------------------------------------------------------- access --
+  # (or use the standard "password:" / "ssh_authorized_keys:" further below)
+  # ADMIN_PASSWORD: Change-Me-Please-1
+  # ADMIN_PASSWORD_HASH: "$6$rounds=5000$examplesalt$examplehash"
+  # ADMIN_SSH_KEYS: "ssh-ed25519 AAAAC3Nza... you@laptop; ssh-rsa AAAAB3Nza... other@desk"
+  SSH_PASSWORD_LOGIN: "yes"
+
+  # ---------------------------------------------------------- this VM --
+  HOSTNAME: eve-netboot
+  TZ: UTC
+
+  # ---------------------------------------------------------- network --
   NET_MODE: dhcp
+  # NET_MODE: static
+  # NET_ADDRESS: 192.168.1.20/24
+  # NET_GATEWAY: 192.168.1.1
+  # NET_DNS: 192.168.1.1 1.1.1.1
+  # NET_INTERFACE: enp0s1
+
+  # ----------------------------------------------------- import share --
+  SMB_IMPORT_SHARE: "no"
+  # SMB_PASSWORD: Another-Password-1
+
+  # ======================================================= PXE server ==
+  SERVER_IP: auto
+  HTTP_PORT: 8080
+  # HTTP_BIND: ""
+  # TFTP_LISTEN: 0.0.0.0:69
+  EVE_IMPORT_LABEL: import share
   EVE_LANGUAGE: en
-  EVE_ARCHES: amd64 arm64
+  EVE_MENU_MODE: standalone
+  # EVE_MENU_TIMEOUT: 300
+  EVE_ARCHES: amd64
+  # EVE_ARCHES: amd64 arm64
   EVE_FLAVOURS: kvm
   EVE_LTS_LINES: 3
-  EVE_DEFAULT_INSTALL_SERVER: zedcloud.zededa.net
-  SMB_IMPORT_SHARE: no
+  # EVE_SYNC_INTERVAL: 86400
+  # EVE_IMPORT_INTERVAL: 60
+  # EVE_GITHUB_REPO: lf-edge/eve
+  # EVE_GITHUB_TOKEN: github_pat_...
 
-# password for "admin" (console, menu, SSH)
-password: Change-Me-Please-1
-chpasswd:
-  expire: false
-ssh_authorized_keys:
-  - ssh-ed25519 AAAA-REPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
+  # ------------------------ defaults of the installation options --
+  # EVE_DEFAULT_REBOOT: 1
+  # EVE_DEFAULT_SOFT_SERIAL: 1
+  # EVE_DEFAULT_NUKE_ALL_DISKS: 0
+  # EVE_DEFAULT_SERIAL: none
+  # EVE_DEFAULT_INSTALL_DISK: sda
+  # EVE_DEFAULT_PERSIST_DISK: sdb,sdc
+  # EVE_DEFAULT_INSTALL_SERVER: zedcloud.zededa.net
+  # EVE_DEFAULT_EXTRA_ARGS: ""
+
+  # -------------------------------------------------------------- iPXE --
+  # IPXE_ALIASES_X86_64: ipxe.efi
+  # IPXE_ALIASES_ARM64: ""
+
+  # ----------------------------------- application image (see .env file) --
+  # EVE_IMAGE: ghcr.io/michiel-zededa/eve-netboot-installer:1.2.0
+
+# ===================================================== standard cloud-init ==
+# These apply to the user "admin". cloud-init handles them before the
+# appliance settings are applied.
+
+# Password of admin (VM screen menu, SSH); "expire: false" = no forced change
+# password: Change-Me-Please-1
+# chpasswd:
+#   expire: false
+
+# SSH public keys of admin
+# ssh_authorized_keys:
+#   - ssh-ed25519 AAAAC3Nza... you@laptop
+#   - ssh-rsa AAAAB3Nza... other@desk
+
+# Not useful here: "network:" (the appliance manages the network itself:
+# use NET_MODE etc.), "hostname:" (use HOSTNAME), "packages:" (the VM has
+# what it needs; extra packages are not protected by its updates).

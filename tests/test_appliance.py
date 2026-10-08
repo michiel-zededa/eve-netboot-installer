@@ -8,6 +8,7 @@ settings parsing, cloud-init input, validation and the generated files.
 import importlib.machinery
 import importlib.util
 import os
+import re
 import tempfile
 import unittest
 
@@ -167,6 +168,51 @@ class RenderTest(unittest.TestCase):
         path = os.path.join(HERE, "..", "vm", "rootfs", "etc", "systemd", "network", "20-eve-netboot.network")
         with open(path) as f:
             self.assertEqual(f.read(), app.render_networkd({})[1])
+
+
+class ReferenceExamplesTest(unittest.TestCase):
+    """vm/examples/ are the syntax references in the docs: they must parse, be
+    valid as they are, and mention every setting there is."""
+
+    EXAMPLES = os.path.join(HERE, "..", "vm", "examples")
+    # build-time or fixed in the VM, so not in the references
+    NOT_IN_REFERENCE = {"IPXE_VERSION", "DATA_DIR", "IMPORT_DIR", "EVE_SRC_DIR"}
+
+    def read(self, name):
+        with open(os.path.join(self.EXAMPLES, name), encoding="utf-8") as f:
+            return f.read()
+
+    def all_settings(self):
+        with open(os.path.join(HERE, "..", ".env.example"), encoding="utf-8") as f:
+            app_keys = set(re.findall(r"(?m)^([A-Z][A-Z0-9_]*)=", f.read()))
+        return (app_keys | app.VM_KEYS) - self.NOT_IN_REFERENCE
+
+    def mentioned(self, text, sep):
+        # active and commented-out settings ("# KEY=value", "  # KEY: value")
+        return set(re.findall(r"(?m)^\s*#?\s*([A-Z][A-Z0-9_]*)" + sep, text))
+
+    def test_env_reference(self):
+        text = self.read("eve-netboot.env")
+        s = app.parse_user_data(text)
+        self.assertTrue(s)
+        self.assertEqual(app.validate(s), [])
+        self.assertEqual(self.all_settings() - self.mentioned(text, "="), set())
+
+    @unittest.skipUnless(HAVE_YAML, "python3-yaml not installed")
+    def test_cloud_config_reference(self):
+        text = self.read("cloud-config.yaml")
+        s = app.parse_user_data(text)
+        self.assertTrue(s)
+        self.assertEqual(app.validate(s), [])
+        self.assertEqual(s["SSH_PASSWORD_LOGIN"], "yes")
+        self.assertEqual(s["HTTP_PORT"], "8080")
+        self.assertEqual(self.all_settings() - self.mentioned(text, ":"), set())
+
+    def test_both_references_agree_on_defaults(self):
+        if not HAVE_YAML:
+            self.skipTest("python3-yaml not installed")
+        self.assertEqual(app.parse_user_data(self.read("eve-netboot.env")),
+                         app.parse_user_data(self.read("cloud-config.yaml")))
 
 
 if __name__ == "__main__":

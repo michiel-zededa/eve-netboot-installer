@@ -211,7 +211,7 @@ configuration*, Proxmox `cicustom`, libvirt `--cloud-init`, OpenStack), the VM
 reads its settings from there at the first boot and starts by itself. Two
 formats work; use the one your platform makes easiest.
 
-**Plain `KEY=VALUE` lines** ([full example](examples/settings.txt)):
+**Plain `KEY=VALUE` lines** ([reference with every setting](examples/eve-netboot.env)):
 
 ```sh
 ADMIN_PASSWORD=Change-Me-Please-1
@@ -221,7 +221,7 @@ EVE_ARCHES=amd64
 EVE_DEFAULT_INSTALL_SERVER=zedcloud.zededa.net
 ```
 
-**A `#cloud-config`** with an `eve_netboot:` section ([full example](examples/cloud-config.yaml)). The rest of the file is standard cloud-init and applies to the user `admin`:
+**A `#cloud-config`** with an `eve_netboot:` section ([reference with every setting](examples/cloud-config.yaml)). The rest of the file is standard cloud-init and applies to the user `admin`:
 
 ```yaml
 #cloud-config
@@ -333,6 +333,14 @@ custom configuration. The exported text is valid cloud-init user-data too.
 The VM keeps its settings in `/etc/eve-netboot/settings.env`. The menu changes
 them; cloud-init user-data and imports use the same names.
 
+Two reference files show every setting with its syntax, an explanation and
+the default value. Both work as they are, as cloud-init user-data:
+
+| File | Syntax |
+|---|---|
+| [examples/eve-netboot.env](examples/eve-netboot.env) | `KEY=VALUE` lines, the same as a Docker Compose `.env` |
+| [examples/cloud-config.yaml](examples/cloud-config.yaml) | `#cloud-config` with an `eve_netboot:` section, plus the standard cloud-init keys for `admin` |
+
 **The VM itself**
 
 | Setting | Default | Meaning |
@@ -347,6 +355,7 @@ them; cloud-init user-data and imports use the same names.
 | `NET_ADDRESS` | | With `static`: address with prefix, `192.168.1.20/24` |
 | `NET_GATEWAY` | | With `static`: default gateway (empty = none) |
 | `NET_DNS` | | With `static`: DNS servers, separated by spaces |
+| `NET_INTERFACE` | | With `static` and several adapters: the adapter that gets the address (default: the first) |
 | `SMB_IMPORT_SHARE` | `no` | `yes` = share the import folder as `\\<VM>\eve-import` |
 | `SMB_PASSWORD` | | Password of that share (user `admin`). Applied and then forgotten. |
 
@@ -415,4 +424,4 @@ vm/build/build.sh --arch amd64 --version 1.2.0
 | `vm/build/build.sh` | Downloads the Debian image, boots it with QEMU and runs `provision.sh` inside |
 | `vm/build/provision.sh` | Installs Docker (from Debian), the application image and the appliance files, then cleans up |
 | `vm/build/eve-netboot.ovf.in` | OVF descriptor of the VMware OVA |
-| `vm/examples/` | cloud-init settings examples |
+| `vm/examples/` | Settings references (`KEY=VALUE` and `#cloud-config`), also used by the tests |
