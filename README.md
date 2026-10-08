@@ -176,9 +176,9 @@ To build the image yourself instead, clone the repository, leave `ENI_IMAGE` emp
 
 Everything is configured in `.env`; [.env.example](.env.example) documents every option.
 
-- **`ENI_*`:** settings of EVE-Netboot-Installer itself (language, what to mirror, menu, image).
-- **`EVE_DEFAULT_*`:** defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
-- **Before 1.3** the `ENI_*` settings were called `EVE_*` (`EVE_LANGUAGE`, `EVE_ARCHES`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
+- **`ENI_*`:** EVE-Netboot-Installer itself: image, language, boot menu, sync intervals, GitHub token.
+- **`EVE_*`:** EVE-OS: which releases are mirrored (`EVE_ARCHES`, `EVE_FLAVOURS`, `EVE_LTS_LINES`, `EVE_GITHUB_REPO`) and, as `EVE_DEFAULT_*`, the defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
+- **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, `EVE_MENU_MODE`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
 
 The most important ones:
 
@@ -189,9 +189,9 @@ The most important ones:
 | `DATA_DIR` | `./data` | Mirror, menu and TFTP files |
 | `IMPORT_DIR` | `./import` | Folder scanned for your own installer ISOs |
 | `ENI_LANGUAGE` | `en` | `en` `de` `fr` `es` `pt` `nl` `da` `no` |
-| `ENI_ARCHES` | `amd64` | `amd64`, `arm64` or both |
-| `ENI_FLAVOURS` | `kvm` | `kvm`, `k` or both |
-| `ENI_LTS_LINES` | `3` | Number of LTS lines to mirror |
+| `EVE_ARCHES` | `amd64` | `amd64`, `arm64` or both |
+| `EVE_FLAVOURS` | `kvm` | `kvm`, `k` or both |
+| `EVE_LTS_LINES` | `3` | Number of LTS lines to mirror |
 | `ENI_MENU_TIMEOUT` | `300` | Seconds until the menu boots the local disk (`0` = wait) |
 | `ENI_MENU_MODE` | `standalone` | `chained` when called from another iPXE menu (exit returns to that menu instead of the local disk) |
 | `EVE_DEFAULT_*` | | Default values of the installation options (disk, persist disk, controller, serial console, …) |

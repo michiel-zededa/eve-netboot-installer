@@ -40,8 +40,8 @@ Consequence: the target needs enough RAM for the kernel plus the whole ISO
 ## GitHub mirroring
 
 Every `ENI_SYNC_INTERVAL` seconds `sync` lists the releases of
-`ENI_GITHUB_REPO`, keeps non-prerelease tags ending in `-lts`, groups them by
-`major.minor` and takes the highest patch of the newest `ENI_LTS_LINES` lines.
+`EVE_GITHUB_REPO`, keeps non-prerelease tags ending in `-lts`, groups them by
+`major.minor` and takes the highest patch of the newest `EVE_LTS_LINES` lines.
 For each wanted `<arch>.<flavour>.generic.installer.iso` it
 
 - downloads the ISO (up to 3 attempts, each from the start; written to a

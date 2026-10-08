@@ -40,19 +40,25 @@ import urllib.request
 
 
 def _env(name, default=""):
-    """ENI_* settings were called EVE_* before 1.3; the old name still works."""
+    """ENI_* settings were called EVE_* before 1.3 (see RENAMED); the old name still works."""
     v = os.environ.get(name)
     if (v is None or v.strip() == "") and name.startswith("ENI_"):
         v = os.environ.get("EVE_" + name[4:])
     return default if v is None or v.strip() == "" else v.strip()
 
 
+# installer settings that were called EVE_* before 1.3; EVE_ARCHES, EVE_FLAVOURS,
+# EVE_LTS_LINES, EVE_GITHUB_REPO (about EVE-OS) and EVE_DEFAULT_* keep their name
+RENAMED = ("IMAGE", "SRC_DIR", "LANGUAGE", "MENU_MODE", "MENU_TIMEOUT", "SYNC_INTERVAL",
+           "IMPORT_INTERVAL", "IMPORT_LABEL", "GITHUB_TOKEN")
+
+
 def legacy_names():
     """Settings still given with their pre-1.3 EVE_* name (directly, or as
     reported by compose in ENI_LEGACY_NAMES)."""
     names = set(_env("ENI_LEGACY_NAMES").split())
-    names |= {k for k in os.environ if k.startswith("EVE_") and not k.startswith("EVE_DEFAULT_")
-              and os.environ.get("ENI_" + k[4:]) in (None, "")}
+    names |= {"EVE_" + n for n in RENAMED
+              if os.environ.get("EVE_" + n) and not os.environ.get("ENI_" + n)}
     return sorted(names)
 
 
@@ -81,12 +87,12 @@ TFTP_DIR = _env("ENI_TFTP_DIR", "/tftp")
 IMPORT_LABEL = _env("ENI_IMPORT_LABEL", "")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_URL = _env("ENI_BASE_URL").rstrip("/")
-ARCHES = _env("ENI_ARCHES", "amd64").split()
-FLAVOURS = _env("ENI_FLAVOURS", "kvm").split()
-LTS_LINES = _env_int("ENI_LTS_LINES", 3)
+ARCHES = _env("EVE_ARCHES", "amd64").split()
+FLAVOURS = _env("EVE_FLAVOURS", "kvm").split()
+LTS_LINES = _env_int("EVE_LTS_LINES", 3)
 SYNC_INTERVAL = _env_int("ENI_SYNC_INTERVAL", 86400)
 IMPORT_INTERVAL = _env_int("ENI_IMPORT_INTERVAL", 60)
-REPO = _env("ENI_GITHUB_REPO", "lf-edge/eve")
+REPO = _env("EVE_GITHUB_REPO", "lf-edge/eve")
 # ENI_GITHUB_TOKEN, not GITHUB_TOKEN, in compose: a GITHUB_TOKEN exported in the
 # shell that runs "docker compose up" would otherwise end up in the container.
 # GITHUB_TOKEN still works for plain "docker run -e".

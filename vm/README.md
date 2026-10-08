@@ -217,7 +217,7 @@ formats work; use the one your platform makes easiest.
 ADMIN_PASSWORD=Change-Me-Please-1
 SERVER_IP=auto
 ENI_LANGUAGE=en
-ENI_ARCHES=amd64
+EVE_ARCHES=amd64
 EVE_DEFAULT_INSTALL_SERVER=zedcloud.zededa.net
 ```
 
@@ -333,8 +333,8 @@ custom configuration. The exported text is valid cloud-init user-data too.
 The VM keeps its settings in `/etc/eve-netboot/settings.env`. The menu changes
 them; cloud-init user-data and imports use the same names.
 
-- **`ENI_*`:** settings of EVE-Netboot-Installer itself; **`EVE_DEFAULT_*`:** defaults of EVE-OS's own installation options; the rest configure the VM.
-- **Before 1.3** the `ENI_*` settings were called `EVE_*`. The VM converts the old names automatically, in its settings, in cloud-init user-data and in imports.
+- **`ENI_*`:** EVE-Netboot-Installer itself; **`EVE_*`:** EVE-OS (which releases are mirrored, and as `EVE_DEFAULT_*` the defaults of its installation options); the rest configure the VM.
+- **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, ...). The VM converts the old names automatically, in its settings, in cloud-init user-data and in imports.
 
 Two reference files show every setting with its syntax, an explanation and
 the default value. Both work as they are, as cloud-init user-data:
@@ -369,9 +369,9 @@ the default value. Both work as they are, as cloud-init user-data:
 | `SERVER_IP` | `auto` | Address the PXE clients use; `auto` = the VM's own |
 | `HTTP_PORT` | `8080` | Port of the status page and the boot menu |
 | `ENI_LANGUAGE` | `en` | `en` `de` `fr` `es` `pt` `nl` `da` `no` |
-| `ENI_ARCHES` | `amd64` | `amd64`, `arm64` or both (`amd64 arm64`) |
-| `ENI_FLAVOURS` | `kvm` | `kvm`, `k` or both |
-| `ENI_LTS_LINES` | `3` | How many EVE-OS LTS release lines to mirror |
+| `EVE_ARCHES` | `amd64` | `amd64`, `arm64` or both (`amd64 arm64`) |
+| `EVE_FLAVOURS` | `kvm` | `kvm`, `k` or both |
+| `EVE_LTS_LINES` | `3` | How many EVE-OS LTS release lines to mirror |
 | `ENI_MENU_TIMEOUT` | `300` | Seconds before the boot menu boots the local disk |
 | `EVE_DEFAULT_INSTALL_SERVER` | | Default controller in the installation options |
 | `EVE_DEFAULT_SERIAL` | `none` | Default serial console: `ttyS0`, `ttyS1`, `ttyAMA0` |

@@ -36,7 +36,7 @@ class ParseEnvTest(unittest.TestCase):
         text = """
 # comment
 SERVER_IP=192.168.1.10          # <- marker
-ENI_ARCHES=amd64 arm64
+EVE_ARCHES=amd64 arm64
 QUOTED="a # not a comment"
 SINGLE='x'
 export TZ=Europe/Amsterdam
@@ -45,7 +45,7 @@ BROKEN
 EMPTY=
 """
         self.assertEqual(app.parse_env(text), {
-            "SERVER_IP": "192.168.1.10", "ENI_ARCHES": "amd64 arm64", "QUOTED": "a # not a comment",
+            "SERVER_IP": "192.168.1.10", "EVE_ARCHES": "amd64 arm64", "QUOTED": "a # not a comment",
             "SINGLE": "x", "TZ": "Europe/Amsterdam", "EMPTY": ""})
 
     def test_password_with_hash_needs_quotes(self):
@@ -70,12 +70,12 @@ class UserDataTest(unittest.TestCase):
 password: x
 eve_netboot:
   server_ip: auto
-  ENI_ARCHES: amd64 arm64
+  EVE_ARCHES: amd64 arm64
   SSH_PASSWORD_LOGIN: false
-  ENI_LTS_LINES: 2
+  EVE_LTS_LINES: 2
 """
         self.assertEqual(app.parse_user_data(text), {
-            "SERVER_IP": "auto", "ENI_ARCHES": "amd64 arm64", "SSH_PASSWORD_LOGIN": "no", "ENI_LTS_LINES": "2"})
+            "SERVER_IP": "auto", "EVE_ARCHES": "amd64 arm64", "SSH_PASSWORD_LOGIN": "no", "EVE_LTS_LINES": "2"})
 
     @unittest.skipUnless(HAVE_YAML, "python3-yaml not installed")
     def test_cloud_config_without_our_section(self):
@@ -85,7 +85,7 @@ eve_netboot:
     def test_old_names_are_migrated(self):
         # pre-1.3 names in user-data, settings.env or an import
         self.assertEqual(app.parse_user_data("EVE_LANGUAGE=de\nEVE_ARCHES=arm64\nEVE_DEFAULT_SERIAL=ttyS0\n"),
-                         {"ENI_LANGUAGE": "de", "ENI_ARCHES": "arm64", "EVE_DEFAULT_SERIAL": "ttyS0"})
+                         {"ENI_LANGUAGE": "de", "EVE_ARCHES": "arm64", "EVE_DEFAULT_SERIAL": "ttyS0"})
         # the new name wins over the old one
         self.assertEqual(app.parse_env("EVE_LANGUAGE=de\nENI_LANGUAGE=nl\n"), {"ENI_LANGUAGE": "nl"})
         self.assertNotIn("EVE_SRC_DIR", app.merge({}, app.parse_env("EVE_SRC_DIR=/x\n")))
@@ -93,8 +93,9 @@ eve_netboot:
 
     @unittest.skipUnless(HAVE_YAML, "python3-yaml not installed")
     def test_old_names_in_cloud_config(self):
-        self.assertEqual(app.parse_user_data("#cloud-config\neve_netboot:\n  EVE_LTS_LINES: 2\n"),
-                         {"ENI_LTS_LINES": "2"})
+        self.assertEqual(app.parse_user_data("#cloud-config\neve_netboot:\n  EVE_MENU_MODE: chained\n"
+                                             "  EVE_LTS_LINES: 2\n"),
+                         {"ENI_MENU_MODE": "chained", "EVE_LTS_LINES": "2"})
 
     def test_merge_drops_fixed_keys(self):
         self.assertEqual(app.merge({"A": "1", "B": "2"}, {"B": "3", "DATA_DIR": "/x"}), {"A": "1", "B": "3"})
@@ -116,14 +117,14 @@ class ValidateTest(unittest.TestCase):
 
     def test_values(self):
         for bad in ({"SERVER_IP": "host.example"}, {"HTTP_PORT": "69"}, {"HTTP_PORT": "x"},
-                    {"HOSTNAME": "bad_name"}, {"ENI_LANGUAGE": "xx"}, {"ENI_ARCHES": "riscv"},
-                    {"ENI_FLAVOURS": "xen"}, {"SMB_IMPORT_SHARE": "maybe"},
+                    {"HOSTNAME": "bad_name"}, {"ENI_LANGUAGE": "xx"}, {"EVE_ARCHES": "riscv"},
+                    {"EVE_FLAVOURS": "xen"}, {"SMB_IMPORT_SHARE": "maybe"},
                     {"EVE_DEFAULT_SERIAL": "ttyUSB0"}, {"EVE_DEFAULT_EXTRA_ARGS": "it's"}):
             with self.subTest(bad=bad):
                 self.assertTrue(app.validate(bad))
         # empty means "use the default"
-        self.assertEqual(app.validate({"ENI_ARCHES": ""}), [])
-        self.assertEqual(app.validate({"ENI_ARCHES": "amd64 arm64", "ENI_FLAVOURS": "kvm k"}), [])
+        self.assertEqual(app.validate({"EVE_ARCHES": ""}), [])
+        self.assertEqual(app.validate({"EVE_ARCHES": "amd64 arm64", "EVE_FLAVOURS": "kvm k"}), [])
 
 
 class VersionTest(unittest.TestCase):

@@ -20,9 +20,10 @@
 # Lines that are not commented out show the DEFAULT values, so this file as
 # it is gives a working VM with DHCP. Uncomment and change what you need.
 #
-# Names: ENI_* = settings of EVE-Netboot-Installer itself, EVE_DEFAULT_* =
-# defaults of EVE-OS's installation options, the rest configure the VM.
-# The pre-1.3 names (EVE_LANGUAGE instead of ENI_LANGUAGE, ...) still work.
+# Names: ENI_* = EVE-Netboot-Installer itself; EVE_* = EVE-OS (which
+# releases are mirrored, EVE_DEFAULT_* = defaults of its installation
+# options); the rest configure the VM. The pre-1.3 names of the ENI_*
+# settings (EVE_LANGUAGE instead of ENI_LANGUAGE, ...) still work.
 # ===========================================================================
 
 eve_netboot:
@@ -58,13 +59,13 @@ eve_netboot:
   ENI_LANGUAGE: en
   ENI_MENU_MODE: standalone
   # ENI_MENU_TIMEOUT: 300
-  ENI_ARCHES: amd64
-  # ENI_ARCHES: amd64 arm64
-  ENI_FLAVOURS: kvm
-  ENI_LTS_LINES: 3
+  EVE_ARCHES: amd64
+  # EVE_ARCHES: amd64 arm64
+  EVE_FLAVOURS: kvm
+  EVE_LTS_LINES: 3
   # ENI_SYNC_INTERVAL: 86400
   # ENI_IMPORT_INTERVAL: 60
-  # ENI_GITHUB_REPO: lf-edge/eve
+  # EVE_GITHUB_REPO: lf-edge/eve
   # ENI_GITHUB_TOKEN: github_pat_...
 
   # ------------------------ defaults of the installation options --

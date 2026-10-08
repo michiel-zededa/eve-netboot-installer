@@ -45,8 +45,9 @@ Also check:
 All settings live in one `.env` file. Only `SERVER_IP` is required; every
 other setting has a sensible default. [.env.example](../.env.example)
 documents all of them: `ENI_*` are settings of EVE-Netboot-Installer itself,
-`EVE_DEFAULT_*` the defaults of EVE-OS's installation options. (Before 1.3 the
-`ENI_*` settings were called `EVE_*`; the old names still work.)
+`EVE_*` are about EVE-OS (which releases are mirrored, and `EVE_DEFAULT_*` for
+its installation options). (Before 1.3 the `ENI_*` settings were called `EVE_*`
+as well; the old names still work.)
 
 Start from the example that is closest to what you want and change the
 values marked `# <-`. The lines already exist in `.env.example`; change their
@@ -88,12 +89,12 @@ EVE_DEFAULT_SERIAL=ttyS0                                         # <- or none
 ### More architectures and variants
 
 ```sh
-ENI_ARCHES=amd64 arm64        # no quotes needed
-ENI_FLAVOURS=kvm k            # k = Kubernetes variant, needs >= 8 GB RAM on the target
-ENI_LTS_LINES=2               # fewer lines = less disk space
+EVE_ARCHES=amd64 arm64        # no quotes needed
+EVE_FLAVOURS=kvm k            # k = Kubernetes variant, needs >= 8 GB RAM on the target
+EVE_LTS_LINES=2               # fewer lines = less disk space
 ```
 
-Every combination costs disk space: up to `ENI_LTS_LINES` x arches x
+Every combination costs disk space: up to `EVE_LTS_LINES` x arches x
 flavours variants, at about 0.5 GB (`kvm`) or 0.7 GB (`k`) each. The example
 above is up to 2 x 2 x 2 = 8 variants, about 5 GB. Combinations that a release
 does not publish (older releases have no arm64 `k` ISO) are skipped.

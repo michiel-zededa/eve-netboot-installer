@@ -317,10 +317,14 @@ class OldNamesTest(unittest.TestCase):
         self.assertEqual(eve_sync._env("ENI_SOMETHING", "default"), "default")
 
     def test_legacy_names_reported(self):
-        env = {"ENI_LEGACY_NAMES": "EVE_LANGUAGE EVE_ARCHES ", "EVE_LTS_LINES": "2",
-               "EVE_DEFAULT_SERIAL": "ttyS0", "EVE_IMAGE": "x", "ENI_IMAGE": "y"}
+        env = {"ENI_LEGACY_NAMES": "EVE_LANGUAGE EVE_MENU_MODE ", "EVE_SYNC_INTERVAL": "0",
+               # current names about EVE-OS, never reported
+               "EVE_ARCHES": "arm64", "EVE_LTS_LINES": "2", "EVE_GITHUB_REPO": "x/y",
+               "EVE_DEFAULT_SERIAL": "ttyS0",
+               # the new name is set as well: nothing to report
+               "EVE_IMAGE": "x", "ENI_IMAGE": "y"}
         with mock.patch.dict(os.environ, env):
-            self.assertEqual(eve_sync.legacy_names(), ["EVE_ARCHES", "EVE_LANGUAGE", "EVE_LTS_LINES"])
+            self.assertEqual(eve_sync.legacy_names(), ["EVE_LANGUAGE", "EVE_MENU_MODE", "EVE_SYNC_INTERVAL"])
 
 
 class HelpersTest(unittest.TestCase):
