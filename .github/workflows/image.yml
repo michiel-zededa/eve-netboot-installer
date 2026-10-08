@@ -116,6 +116,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          # only the VM images: the Docker build also leaves an artifact
+          pattern: vm-*
           path: dist
           merge-multiple: true
       - name: Attach the VM images to the release (created if it does not exist yet)
