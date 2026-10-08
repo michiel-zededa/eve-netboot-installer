@@ -6,6 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Image](https://github.com/michiel-zededa/eve-netboot-installer/actions/workflows/image.yml/badge.svg)](https://github.com/michiel-zededa/eve-netboot-installer/actions/workflows/image.yml)
+[![Tests](https://github.com/michiel-zededa/eve-netboot-installer/actions/workflows/test.yml/badge.svg)](https://github.com/michiel-zededa/eve-netboot-installer/actions/workflows/test.yml)
 ![Platforms](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-informational)
 ![Docker Compose](https://img.shields.io/badge/runs%20on-Docker%20Compose-2496ED?logo=docker&logoColor=white)
 
@@ -115,7 +116,7 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
 **Disk**
 
-- About 0.6 GB per mirrored release variant.
+- About 0.5 GB per mirrored `kvm` variant and 0.7 GB per `k` variant.
 - The defaults (3 LTS lines, amd64 `kvm`) need about 2 GB.
 
 **DHCP**
@@ -165,8 +166,24 @@ docker compose pull && docker compose up -d --no-build
 | Platform | Guide |
 |---|---|
 | Any Linux host with Docker Compose | [Quick start](#quick-start) |
-| OpenMediaVault (compose plugin) | [deploy/omv](deploy/omv/README.md): uses `CHANGE_TO_COMPOSE_DATA_PATH` in `.env` |
+| A compose manager or NAS (web UI that runs compose stacks) | [Compose managers and NAS](#compose-managers-and-nas) |
 | EVE-OS edge node (ZEDEDA) or any hypervisor | [deploy/debian-vm](deploy/debian-vm/README.md): a cloud-init Debian VM that installs and runs the stack by itself |
+
+### Compose managers and NAS
+
+Web UIs that manage compose stacks usually keep `compose.yaml` and its environment in their own folder, not in a checkout of this repository. The stack works unchanged there:
+
+- **Stack file:** paste [compose.yaml](compose.yaml) as it is.
+- **Environment:** start from [.env.example](.env.example).
+- **Paths:** use absolute paths for `DATA_DIR` and `IMPORT_DIR`, because relative paths resolve against the manager's stack folder.
+- **Image, option 1 (prebuilt):** set `EVE_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:latest` and nothing has to be built.
+- **Image, option 2 (local build):** clone this repository somewhere on the host and set `EVE_SRC_DIR` to that absolute path. Update with `git pull` in that folder followed by a rebuild of the stack.
+
+Points to check on a shared host:
+
+- **HTTP port:** many NAS web interfaces use port 80 themselves; keep `HTTP_PORT` on 8080 or another free port.
+- **TFTP:** only one TFTP server can use UDP 69. Stop any other PXE stack first. With `IPXE_ALIASES_X86_64` the iPXE binary is also published under the boot file name your DHCP server already hands out, so switching needs no DHCP change.
+- **Backups:** `DATA_DIR/www/eve/releases` holds the mirrored ISOs. Exclude it from backups if you like; it is downloaded again automatically.
 
 ## Configuration
 
@@ -279,8 +296,8 @@ How the translations work:
 │   └── i18n/              # translations
 ├── docker/                # iPXE build script, embedded iPXE script, entrypoint
 ├── docs/                  # how it works, DHCP configuration
+├── tests/                 # unit tests + EVE GRUB fixtures
 └── deploy/
-    ├── omv/               # OpenMediaVault guide
     └── debian-vm/         # cloud-init Debian VM for EVE nodes / any hypervisor
 ```
 
@@ -292,7 +309,14 @@ Issues and pull requests are welcome. Useful contributions include:
 - additional DHCP server examples;
 - new translations.
 
-Please keep changes to the generated iPXE script ASCII-only, and test a boot in a VM (QEMU with OVMF works well) before submitting.
+Before submitting:
+
+- run the unit tests: `python3 -m unittest discover -s tests` (standard library only, no Docker needed);
+- after editing `deploy/debian-vm/files/`, regenerate `user-data.yaml` with `python3 deploy/debian-vm/build-user-data.py`;
+- keep the generated iPXE script ASCII-only;
+- test a boot in a VM (QEMU with OVMF works well).
+
+CI runs the tests, `ruff` and `shellcheck` on every pull request.
 
 ## License
 

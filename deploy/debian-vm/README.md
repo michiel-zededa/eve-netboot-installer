@@ -133,7 +133,7 @@ The exact names of buttons and fields differ between ZEDEDA releases. The steps 
 **First boot takes 5–10 minutes:**
 
 - package installation, Docker installation and building the image (iPXE is compiled from source);
-- after that, the first GitHub mirror starts. How long it takes depends on the line speed; count about 0.6 GB per variant.
+- after that, the first GitHub mirror starts. How long it takes depends on the line speed; count about 0.5 GB per `kvm` variant and 0.7 GB per `k` variant.
 
 ### Other hypervisors
 
