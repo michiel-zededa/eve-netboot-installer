@@ -68,6 +68,7 @@ What it does:
 | **Status page** | A read-only web page lists every release and local ISO with its architecture, variant, size and checksum state. It is also available as JSON. |
 | **Multilingual** | Menu and status page in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
+| **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware) with a setup menu on its screen or settings through cloud-init, automatic security updates and app updates with rollback. |
 
 ## How it works
 
@@ -166,9 +167,9 @@ To build the image yourself instead, clone the repository, leave `EVE_IMAGE` emp
 
 | Platform | Guide |
 |---|---|
+| **Any hypervisor**: ZEDEDA / EVE-OS, Proxmox, KVM, VMware, ... (easiest, no Linux knowledge needed) | [VM appliance](vm/README.md): download a ready-made VM (qcow2, OVA), start it, answer a few questions on its screen or pass the settings through cloud-init |
 | Any Linux host with Docker Compose | [Deployment guide, path A](docs/deployment.md#path-a-linux-host-with-the-docker-compose-command) |
 | A NAS or a web UI that runs compose stacks | [Deployment guide, path B](docs/deployment.md#path-b-nas-or-compose-manager-web-ui) |
-| EVE-OS edge node (ZEDEDA) or any hypervisor | [deploy/debian-vm](deploy/debian-vm/README.md): a cloud-init Debian VM that installs and runs the stack by itself |
 
 ## Configuration
 
@@ -283,8 +284,7 @@ How the translations work:
 ├── docker/                # iPXE build script, embedded iPXE script, entrypoint
 ├── docs/                  # deployment guide, how it works, DHCP configuration
 ├── tests/                 # unit tests + EVE GRUB fixtures
-└── deploy/
-    └── debian-vm/         # cloud-init Debian VM for EVE nodes / any hypervisor
+└── vm/                    # the VM appliance: setup menu, image build, docs
 ```
 
 ## Contributing
@@ -298,7 +298,7 @@ Issues and pull requests are welcome. Useful contributions include:
 Before submitting:
 
 - run the unit tests: `python3 -m unittest discover -s tests` (standard library only, no Docker needed);
-- after editing `deploy/debian-vm/files/`, regenerate `user-data.yaml` with `python3 deploy/debian-vm/build-user-data.py`;
+- for the VM appliance: build and boot an image (`vm/build/build.sh`, see [vm/README.md](vm/README.md#build-it-yourself));
 - keep the generated iPXE script ASCII-only;
 - test a boot in a VM (QEMU with OVMF works well).
 

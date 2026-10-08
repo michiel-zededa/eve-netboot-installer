@@ -8,7 +8,7 @@ continue.
 |---|---|
 | A Linux host with Docker and the `docker compose` command | [Path A](#path-a-linux-host-with-the-docker-compose-command) |
 | A NAS or a web UI that manages compose stacks | [Path B](#path-b-nas-or-compose-manager-web-ui) |
-| A VM on an EVE-OS edge node or any hypervisor (installs itself) | [deploy/debian-vm](../deploy/debian-vm/README.md) |
+| A VM on any hypervisor: ZEDEDA / EVE-OS, Proxmox, KVM, VMware (easiest) | [VM appliance](../vm/README.md): a ready-made VM, no Docker or Linux knowledge needed |
 
 All paths share [Before you start](#1-before-you-start),
 [DHCP](#5-point-dhcp-at-the-server) and [First network boot](#6-first-network-boot).

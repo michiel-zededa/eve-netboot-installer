@@ -14,8 +14,13 @@ docs/how-it-works.md for the boot chain.
   trailing newline. Every language must have the same keys as `en.json`.
 - `docker/`: iPXE build (from source, x86_64 + arm64 EFI), generic embedded
   script, entrypoint that selects the role.
-- `deploy/debian-vm/`: cloud-init VM. `user-data.yaml` is GENERATED from
-  `files/` by `build-user-data.py`; edit `files/`, then regenerate.
+- `vm/`: the VM appliance (Debian 13 + Docker from Debian + the app image).
+  `vm/rootfs/usr/local/sbin/eve-netboot` (Python + whiptail) is the setup
+  wizard, console, menu, cloud-init input (KEY=VALUE or `eve_netboot:` in a
+  #cloud-config), apply, updates with rollback and export/import.
+  `vm/build/build.sh` builds the qcow2/VMDK/OVA by booting the Debian cloud
+  image in QEMU and running `provision.sh` inside; image.yml does this for
+  every `v*` tag and attaches the images to the release.
 - `tests/`: unittest suite; `tests/fixtures/eve-<tag>/` are the real GRUB files
   of EVE releases.
 
@@ -26,8 +31,11 @@ python3 -m unittest discover -s tests -v
 ```
 
 ```bash
-python3 deploy/debian-vm/build-user-data.py
+vm/build/build.sh --arch arm64 --version dev --image ghcr.io/michiel-zededa/eve-netboot-installer:latest
 ```
+
+The appliance tests (`tests/test_appliance.py`) need PyYAML for the
+#cloud-config cases; without it those are skipped.
 
 CI (`.github/workflows/test.yml`) also runs `ruff check app tests deploy`
 (config in `ruff.toml`) and `shellcheck --severity=warning` on the shell scripts.
@@ -50,3 +58,10 @@ CI (`.github/workflows/test.yml`) also runs `ruff check app tests deploy`
   installations update with a `git pull` or a new image.
 - The repository is generic for any Docker Compose host. No site-specific
   hosts, paths or NAS-specific instructions.
+- Appliance: the console shows only status without login; the menu needs the
+  admin password. Without cloud-init settings nothing starts until the setup
+  is done. Passwords (ADMIN_PASSWORD, SMB_PASSWORD) are applied and never
+  stored; exports never contain secrets. Files from `vm/rootfs` must end up
+  owned by root without changing existing directories (tar --no-same-owner
+  --no-overwrite-dir). eve-netboot-setup.service must not order itself after
+  cloud-final.service (ordering cycle with multi-user.target).
