@@ -203,7 +203,7 @@ Everything is configured in `.env`; [.env.example](.env.example) documents every
 | `EVE_MENU_MODE` | `standalone` | `chained` when called from another iPXE menu (exit returns to that menu instead of the local disk) |
 | `EVE_DEFAULT_*` | | Default values of the installation options (disk, persist disk, controller, serial console, …) |
 | `IPXE_ALIASES_X86_64` | | Extra file names for the iPXE binary, to match a boot file name your DHCP already hands out |
-| `GITHUB_TOKEN` | | Optional; raises the GitHub API rate limit |
+| `EVE_GITHUB_TOKEN` | | Optional; raises the GitHub API rate limit (formerly `GITHUB_TOKEN`) |
 
 Apply changes with `docker compose up -d`. The menu is regenerated on every start.
 

@@ -35,6 +35,7 @@ import time
 import traceback
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -74,7 +75,13 @@ LTS_LINES = _env_int("EVE_LTS_LINES", 3)
 SYNC_INTERVAL = _env_int("EVE_SYNC_INTERVAL", 86400)
 IMPORT_INTERVAL = _env_int("EVE_IMPORT_INTERVAL", 60)
 REPO = _env("EVE_GITHUB_REPO", "lf-edge/eve")
-TOKEN = _env("GITHUB_TOKEN")
+# EVE_GITHUB_TOKEN, not GITHUB_TOKEN, in compose: a GITHUB_TOKEN exported in the
+# shell that runs "docker compose up" would otherwise end up in the container.
+# GITHUB_TOKEN still works for plain "docker run -e".
+TOKEN = _env("EVE_GITHUB_TOKEN") or _env("GITHUB_TOKEN")
+# compose sets this to "set" when GITHUB_TOKEN exists where compose runs (value not passed)
+LEGACY_TOKEN_SEEN = _env("EVE_LEGACY_GITHUB_TOKEN") == "set"
+API_HOST = "api.github.com"
 LANGUAGE = _env("EVE_LANGUAGE", "en").lower()
 # standalone: this menu is the top level (exit = boot local disk);
 # chained:    the menu is chained from another iPXE menu (exit = go back)
@@ -136,14 +143,32 @@ def log(msg):
 # --------------------------------------------------------------------------
 # small helpers
 # --------------------------------------------------------------------------
+def is_api_url(url):
+    u = urllib.parse.urlsplit(url)
+    return u.scheme == "https" and u.hostname == API_HOST
+
+
+class _RedirectHandler(urllib.request.HTTPRedirectHandler):
+    """urllib keeps all headers on a redirect; never pass the token on to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and not is_api_url(newurl):
+            new.remove_header("Authorization")
+        return new
+
+
+_opener = urllib.request.build_opener(_RedirectHandler)
+
+
 def http_get(url, accept=None):
     headers = {"User-Agent": UA}
     if accept:
         headers["Accept"] = accept
-    if TOKEN and "api.github.com" in url:
+    if TOKEN and is_api_url(url):
         headers["Authorization"] = f"Bearer {TOKEN}"
     req = urllib.request.Request(url, headers=headers)
-    return urllib.request.urlopen(req, timeout=60)
+    return _opener.open(req, timeout=60)
 
 
 def http_json(url):
@@ -1028,6 +1053,9 @@ def main():
         log("bsdtar not found (install libarchive-tools) - aborting")
         sys.exit(2)
     os.makedirs(EVE_ROOT, exist_ok=True)
+    if LEGACY_TOKEN_SEEN and not TOKEN:
+        log("GITHUB_TOKEN is set where docker compose runs, but is no longer passed to the "
+            "container; set EVE_GITHUB_TOKEN in .env to use a token (GitHub is queried anonymously)")
     log(f"eve-sync start: arches={ARCHES} flavours={FLAVOURS} lts_lines={LTS_LINES} "
         f"base={BASE_URL} import={IMPORT_DIR} language={LANGUAGE} mode={MENU_MODE}")
     once = "--once" in sys.argv

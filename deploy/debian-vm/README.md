@@ -219,7 +219,7 @@ Changing `EVE_ARCHES`, `EVE_FLAVOURS` or `EVE_LTS_LINES` triggers a new sync: ne
 | PXE client shows "PXE-E32 TFTP open timeout" or similar | DHCP next-server really is the VM's IP. The VM is on a **Switch** network instance, not NAT. `eve-netboot logs tftp` shows a request. |
 | iPXE loads but says *Could not load tftp://…/boot.ipxe* | `SERVER_IP` is wrong or changed. Run `eve-netboot status`. After fixing the reservation, run `eve-netboot start` (re-detects `auto`). |
 | Menu is empty | The first sync is still running (`eve-netboot logs sync`). Or the VM has no internet: test with `curl -I https://github.com`. |
-| GitHub rate limit in the sync log | Add `GITHUB_TOKEN=<personal access token, no scopes>` with `eve-netboot config`. |
+| GitHub rate limit in the sync log | Add `EVE_GITHUB_TOKEN=<fine-grained token without permissions>` with `eve-netboot config`. |
 | Target hangs or panics after loading the installer | Too little RAM on the target. The whole ISO is held in memory: ~2 GB for `kvm`, ~8 GB for `k`. |
 | Installation started but on the wrong disk | Set *Install disk* in the menu, or `EVE_DEFAULT_INSTALL_DISK`. |
 | Status page not reachable | `HTTP_PORT` in use or blocked. Check with `curl -I http://localhost:8080/` on the VM. |

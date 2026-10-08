@@ -260,6 +260,43 @@ class GithubSelectionTest(unittest.TestCase):
         self.assertEqual(got, ["17.0.0-lts", "16.0.10-lts", "14.5.5-lts"])
 
 
+class GithubTokenTest(unittest.TestCase):
+
+    def test_api_url_is_exact(self):
+        self.assertTrue(eve_sync.is_api_url("https://api.github.com/repos/lf-edge/eve/releases"))
+        for url in ("http://api.github.com/repos", "https://api.github.com.example.org/",
+                    "https://example.org/?api.github.com", "https://github.com/lf-edge/eve/releases/download/x",
+                    "https://objects.githubusercontent.com/x"):
+            self.assertFalse(eve_sync.is_api_url(url), url)
+
+    def headers_sent(self, url, token):
+        with mock.patch.object(eve_sync, "TOKEN", token), \
+                mock.patch.object(eve_sync._opener, "open") as op:
+            eve_sync.http_get(url)
+        return op.call_args[0][0].headers
+
+    def test_token_only_to_api(self):
+        api = "https://api.github.com/repos/lf-edge/eve/releases"
+        self.assertEqual(self.headers_sent(api, "t0k")["Authorization"], "Bearer t0k")
+        self.assertNotIn("Authorization", self.headers_sent("https://github.com/x.iso", "t0k"))
+        self.assertNotIn("Authorization", self.headers_sent(api, ""))
+
+    def test_token_dropped_on_redirect_to_other_host(self):
+        req = eve_sync.urllib.request.Request("https://api.github.com/x",
+                                              headers={"Authorization": "Bearer t0k"})
+        handler = eve_sync._RedirectHandler()
+        same = handler.redirect_request(req, None, 301, "", {}, "https://api.github.com/repositories/1/x")
+        other = handler.redirect_request(req, None, 302, "", {}, "https://objects.githubusercontent.com/x")
+        self.assertEqual(same.get_header("Authorization"), "Bearer t0k")
+        self.assertIsNone(other.get_header("Authorization"))
+
+    def test_compose_does_not_pass_github_token(self):
+        with open(os.path.join(HERE, "..", "compose.yaml")) as f:
+            compose = f.read()
+        self.assertNotRegex(compose, r"(?m)^\s*GITHUB_TOKEN:")
+        self.assertIn("EVE_GITHUB_TOKEN: ${EVE_GITHUB_TOKEN:-}", compose)
+
+
 class HelpersTest(unittest.TestCase):
 
     def test_is_eve_iso(self):
