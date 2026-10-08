@@ -99,7 +99,7 @@ printf 'instance-id: eve-netboot-build-%s\nlocal-hostname: eve-netboot\n' "$(dat
 # shellcheck disable=SC2054  # commas belong to qemu options
 args=(-m 3072 -smp 2 -accel "$ACCEL" -cpu "$CPU"
       -drive "if=virtio,format=qcow2,file=$WORK/disk.qcow2,discard=unmap"
-      -netdev user,id=n0 -device virtio-net-pci,netdev=n0
+      -netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile=  # no PXE ROM needed (and not always installed)
       -smbios "type=1,serial=ds=nocloud;s=http://10.0.2.2:$PORT/"
       -display none -serial "file:$WORK/serial.log" -no-reboot)
 if [ "$ARCH" = arm64 ]; then
