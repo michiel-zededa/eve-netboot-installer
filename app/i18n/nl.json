@@ -75,7 +75,7 @@
  "shell_hint": "Typ 'exit' om terug te gaan naar het menu.",
  "embed_fail": "Het EVE-menu kon niet geladen worden van",
  "embed_prompt": "Druk op [s] voor de iPXE-shell, anders wordt de lokale schijf gestart...",
- "page_updated": "Bijgewerkt",
+ "page_github_checked": "Laatste GitHub-controle",
  "page_refresh": "pagina ververst elke minuut",
  "page_lts_lines": "LTS-lijnen",
  "page_arches": "architecturen",

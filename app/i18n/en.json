@@ -75,7 +75,7 @@
  "shell_hint": "Type 'exit' to return to the menu.",
  "embed_fail": "Could not load the EVE menu from",
  "embed_prompt": "Press [s] for the iPXE shell, otherwise booting from local disk...",
- "page_updated": "Updated",
+ "page_github_checked": "Last GitHub check",
  "page_refresh": "page refreshes every minute",
  "page_lts_lines": "LTS lines",
  "page_arches": "architectures",

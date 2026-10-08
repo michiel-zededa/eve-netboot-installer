@@ -1,0 +1,7 @@
+# Lint for real problems only (pyflakes, pycodestyle errors/warnings, bugbear).
+# Long lines are fine: the generated iPXE script and HTML live in strings.
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]

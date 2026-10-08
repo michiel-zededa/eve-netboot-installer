@@ -29,7 +29,7 @@ services:
       EVE_BASE_URL: http://${SERVER_IP:?set SERVER_IP in .env}:${HTTP_PORT:-8080}
       EVE_LANGUAGE: ${EVE_LANGUAGE:-en}
       EVE_MENU_MODE: ${EVE_MENU_MODE:-standalone}
-      EVE_MENU_TIMEOUT: ${EVE_MENU_TIMEOUT:-300}
+      EVE_MENU_TIMEOUT: ${EVE_MENU_TIMEOUT:-}
       EVE_ARCHES: ${EVE_ARCHES:-amd64}
       EVE_FLAVOURS: ${EVE_FLAVOURS:-kvm}
       EVE_LTS_LINES: ${EVE_LTS_LINES:-3}

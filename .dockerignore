@@ -6,3 +6,5 @@ import
 deploy
 docs
 *.md
+tests
+ruff.toml

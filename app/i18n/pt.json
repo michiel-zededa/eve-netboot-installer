@@ -75,7 +75,7 @@
  "shell_hint": "Escreva 'exit' para voltar ao menu.",
  "embed_fail": "Não foi possível carregar o menu do EVE a partir de",
  "embed_prompt": "Prima [s] para o shell do iPXE; caso contrário, arranca a partir do disco local...",
- "page_updated": "Atualizado",
+ "page_github_checked": "Última verificação do GitHub",
  "page_refresh": "a página atualiza-se a cada minuto",
  "page_lts_lines": "linhas LTS",
  "page_arches": "arquiteturas",

@@ -75,7 +75,7 @@
  "shell_hint": "'exit' eingeben, um zum Menü zurückzukehren.",
  "embed_fail": "Das EVE-Menü konnte nicht geladen werden von",
  "embed_prompt": "[s] für die iPXE-Shell, sonst wird von der lokalen Disk gestartet...",
- "page_updated": "Aktualisiert",
+ "page_github_checked": "Letzte GitHub-Prüfung",
  "page_refresh": "Seite wird jede Minute neu geladen",
  "page_lts_lines": "LTS-Linien",
  "page_arches": "Architekturen",

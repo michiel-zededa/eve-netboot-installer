@@ -75,7 +75,7 @@
  "shell_hint": "Skriv 'exit' for å gå tilbake til menyen.",
  "embed_fail": "Kunne ikke laste EVE-menyen fra",
  "embed_prompt": "Trykk [s] for iPXE-skallet, ellers startes lokal disk...",
- "page_updated": "Oppdatert",
+ "page_github_checked": "Siste GitHub-sjekk",
  "page_refresh": "siden oppdateres hvert minutt",
  "page_lts_lines": "LTS-linjer",
  "page_arches": "arkitekturer",

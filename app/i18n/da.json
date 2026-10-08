@@ -75,7 +75,7 @@
  "shell_hint": "Skriv 'exit' for at gå tilbage til menuen.",
  "embed_fail": "EVE-menuen kunne ikke indlæses fra",
  "embed_prompt": "Tryk [s] for iPXE-shell, ellers startes den lokale disk...",
- "page_updated": "Opdateret",
+ "page_github_checked": "Seneste GitHub-tjek",
  "page_refresh": "siden opdateres hvert minut",
  "page_lts_lines": "LTS-linjer",
  "page_arches": "arkitekturer",

@@ -247,7 +247,7 @@ write_files:
         ip=$(sed -n 's/^SERVER_IP=//p' "$SRC/.env" 2>/dev/null); port=$(setting HTTP_PORT 8080)
         echo "VM address : $(primary_ip)   (SERVER_IP in use: ${ip:-?})"
         echo "Status page: http://${ip:-$(primary_ip)}:$port/"
-        echo "DHCP       : next-server ${ip:-?}, boot file eve-x86_64.efi"
+        echo "DHCP       : next-server ${ip:-?}, boot file eve-x86_64.efi (x86_64 UEFI) or eve-arm64.efi (arm64 UEFI)"
         echo
         compose ps
         echo

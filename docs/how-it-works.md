@@ -44,10 +44,15 @@ Every `EVE_SYNC_INTERVAL` seconds `sync` lists the releases of
 `major.minor` and takes the highest patch of the newest `EVE_LTS_LINES` lines.
 For each wanted `<arch>.<flavour>.generic.installer.iso` it
 
-- downloads the ISO (resumable via retries, atomic rename),
+- downloads the ISO (up to 3 attempts, each from the start; written to a
+  temporary file and renamed when complete),
 - verifies it against the release's `*.sha256sums`,
 - extracts `kernel`, `initrd.img`, `ucode.img`, `cmdline` and the GRUB files,
 - removes releases that are no longer wanted.
+
+The menu shows when GitHub was last checked successfully (stored in
+`www/eve/sync-state.json`). Generated files are only rewritten when their
+content changes.
 
 ## Local imports
 
