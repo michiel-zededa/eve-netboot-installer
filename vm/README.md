@@ -188,7 +188,7 @@ buttons) and **Enter**.
 After about a minute the screen shows the status:
 
 ```text
- EVE-Netboot-Installer appliance 1.2.0   (eve-netboot)
+ EVE-Netboot-Installer appliance 1.3.0   (eve-netboot)
 
  VM address      192.168.1.20 (DHCP)
  Status page     http://192.168.1.20:8080/
@@ -418,7 +418,7 @@ cloud image, on every version tag ([image.yml](../.github/workflows/image.yml)).
 To build one locally (Linux with KVM, or macOS for the native architecture):
 
 ```bash
-vm/build/build.sh --arch amd64 --version 1.2.0
+vm/build/build.sh --arch amd64 --version 1.3.0
 ```
 
 | Path | Contents |
