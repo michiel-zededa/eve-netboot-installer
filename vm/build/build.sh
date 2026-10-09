@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # Builds the EVE-Netboot-Installer VM appliance from the Debian 13 cloud image.
 #
-#   vm/build/build.sh --arch amd64|arm64 --version 1.4.0 [options]
+#   vm/build/build.sh --arch amd64|arm64 --version 1.4.1 [options]
 #
 #   --image REF       container image baked in (default ghcr.io/michiel-zededa/
 #                     eve-netboot-installer:<version>)
