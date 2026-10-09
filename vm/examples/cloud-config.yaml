@@ -87,7 +87,7 @@ eve_netboot:
   # IPXE_ALIASES_ARM64: ""
 
   # ----------------------------------- application image (see .env file) --
-  # ENI_IMAGE: ghcr.io/michiel-zededa/eve-netboot-installer:1.4.1
+  # ENI_IMAGE: ghcr.io/michiel-zededa/eve-netboot-installer:1.5.0
 
 # ===================================================== standard cloud-init ==
 # These apply to the user "admin". cloud-init handles them before the
