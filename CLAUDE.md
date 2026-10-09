@@ -30,7 +30,8 @@ docs/how-it-works.md for the boot chain.
   stage into /app/ui; the sync copies it into www/ (install_ui). Reads
   eve/status.json, eve/activity.json, eve/ui.json (texts in ENI_LANGUAGE; UI
   strings are ui_* keys in app/i18n, all 8 languages). No CDN: offline LANs.
-  On the VM's port 8443 it also talks to /api/ (management, English only).
+  On the VM's port 8443 it also talks to /api/ (management; texts from
+  /api/texts in any of the 8 languages).
 - `vm/rootfs/usr/local/lib/eve-netboot/eve_netboot_web.py`: the appliance's
   HTTPS management API (`eve-netboot web`, stdlib only, uses the eve-netboot
   module as `core`). Serves the UI from www/ or, before the stack ran, from

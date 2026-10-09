@@ -1,6 +1,6 @@
 <div align="center">
 
-# EVE-Netboot-Installer
+# EVE Netboot Installer
 
 **Network-install [LF Edge EVE-OS](https://github.com/lf-edge/eve) on bare metal: PXE boot, pick a release, press `i`.**
 
@@ -12,7 +12,7 @@
 
 </div>
 
-EVE-Netboot-Installer is a self-contained PXE boot server for EVE-OS. It runs as a small Docker Compose stack on any Linux host, NAS or VM, including a VM on an EVE edge node.
+EVE Netboot Installer is a self-contained PXE boot server for EVE-OS. It runs as a small Docker Compose stack on any Linux host, NAS or VM, including a VM on an EVE edge node.
 
 What it does:
 
@@ -36,10 +36,24 @@ What it does:
      (no key pressed within 300 s: boot from local disk)
 ```
 
+## Screenshots
+
+All taken on a test VM in a documentation network (`192.0.2.0/24`).
+
+| | |
+|---|---|
+| ![Web UI home page](docs/images/web-home.png) | ![Web UI images page](docs/images/web-images.png) |
+| **Web UI:** the images, the activity and the DHCP settings at a glance; light, [dark](docs/images/web-home-dark.png) or system theme. | **Images:** the GitHub mirror and your own ISOs, with the details of each. |
+| ![iPXE boot menu](docs/images/ipxe-menu.png) | ![Confirmation before installing](docs/images/ipxe-confirm.png) |
+| **Boot menu** on the machine, in the look of EVE-OS's own console. | **Confirmation** before installing, with the options and a warning. |
+| ![VM appliance console](docs/images/console-status.png) | ![Web management](docs/images/web-settings.png) |
+| **VM appliance console:** status with tabs, coloured states, the keys and a clock. | **Web management** of the VM: the same settings as its console menu. |
+
 ---
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
@@ -66,7 +80,7 @@ What it does:
 | **Safe by default** | A summary screen requires an explicit **`i`** before installing. Without input, the menu falls back to the local disk after a timeout, so a machine that PXE boots by accident never stalls. |
 | **Own iPXE build** | iPXE (x86_64 and arm64 UEFI) is compiled from the official sources during the image build. Only two DHCP options are needed, with no other boot infrastructure. |
 | **Web UI** | A web interface in the look of the ZEDEDA UI (light, dark or system theme): the available images from the GitHub mirror and the import folder with their details (size, checksum, kernel command line, own controller configuration, errors), live download progress, and the DHCP and boot settings. Read-only on port 8080; also available as JSON. |
-| **Multilingual** | Boot menu and web UI in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
+| **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
 | **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); automatic security updates and app updates with rollback. |
 
@@ -99,7 +113,7 @@ The stack consists of one image in three roles:
 
 ### Why not `sanboot` the ISO?
 
-The EVE installer searches for its ISO again once Linux is running, and a SAN-emulated CD-ROM is gone by then. EVE's own netboot path therefore puts the whole ISO *inside* the initrd and boots with `root=/installer.iso`. EVE-Netboot-Installer reproduces exactly that kernel command line, parsed from each ISO's own `grub.cfg`, and drives it from iPXE.
+The EVE installer searches for its ISO again once Linux is running, and a SAN-emulated CD-ROM is gone by then. EVE's own netboot path therefore puts the whole ISO *inside* the initrd and boots with `root=/installer.iso`. EVE Netboot Installer reproduces exactly that kernel command line, parsed from each ISO's own `grub.cfg`, and drives it from iPXE.
 
 See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
@@ -176,7 +190,7 @@ To build the image yourself instead, clone the repository, leave `ENI_IMAGE` emp
 
 Everything is configured in `.env`; [.env.example](.env.example) documents every option.
 
-- **`ENI_*`:** EVE-Netboot-Installer itself: image, language, boot menu, sync intervals, GitHub token.
+- **`ENI_*`:** EVE Netboot Installer itself: image, language, boot menu, sync intervals, GitHub token.
 - **`EVE_*`:** EVE-OS: which releases are mirrored (`EVE_ARCHES`, `EVE_FLAVOURS`, `EVE_LTS_LINES`, `EVE_GITHUB_REPO`) and, as `EVE_DEFAULT_*`, the defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
 - **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, `EVE_MENU_MODE`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
 
@@ -240,7 +254,9 @@ The web UI (`http://SERVER_IP:HTTP_PORT/`) shows the images, activity and boot s
 
 ## Languages
 
-Set `ENI_LANGUAGE` to one of the languages below:
+Set `ENI_LANGUAGE` to one of the languages below. It is the language of the
+boot menu, the web UI and the status page, and on the VM appliance also of its
+console and web management.
 
 | Code | Language |
 |---|---|
@@ -321,4 +337,4 @@ Licensed under the [Apache License 2.0](LICENSE).
 - [LF Edge EVE-OS](https://github.com/lf-edge/eve): the edge operating system this project installs.
 - [iPXE](https://ipxe.org): network boot firmware. It is built from the [official sources](https://github.com/ipxe/ipxe) during the image build and is licensed under GPLv2.
 
-EVE-Netboot-Installer is an independent community project and is not affiliated with or endorsed by LF Edge.
+EVE Netboot Installer is an independent community project and is not affiliated with or endorsed by LF Edge.

@@ -44,7 +44,7 @@ Also check:
 
 All settings live in one `.env` file. Only `SERVER_IP` is required; every
 other setting has a sensible default. [.env.example](../.env.example)
-documents all of them: `ENI_*` are settings of EVE-Netboot-Installer itself,
+documents all of them: `ENI_*` are settings of EVE Netboot Installer itself,
 `EVE_*` are about EVE-OS (which releases are mirrored, and `EVE_DEFAULT_*` for
 its installation options). (Before 1.3 the `ENI_*` settings were called `EVE_*`
 as well; the old names still work.)
@@ -322,13 +322,17 @@ If you only have x86_64 machines, `eve-x86_64.efi` for everyone is fine.
    *Network Stack* or *IPv4 PXE*) in the firmware setup.
 2. **Boot from the network once,** using the one-time boot menu (often F11,
    F12 or Esc) and the *UEFI: IPv4 / PXE* entry for the right network port.
-3. You see `EVE-Netboot-Installer (iPXE ...)`, then the EVE menu with the
+3. You see `EVE Netboot Installer (iPXE ...)`, then the EVE menu with the
    releases that match the machine's architecture.
+
+   ![The boot menu](images/ipxe-menu.png)
 4. **Optional:** open *Installation options...* to set the target disk,
    controller, serial console and so on. The values you set in `.env` are
    already filled in.
 5. **Choose a release.** A summary screen shows the source, the options and a
    warning that the disk will be wiped.
+
+   ![The summary before installing](images/ipxe-confirm.png)
 6. **Press `i`** to install. Any other key returns to the menu.
 7. The machine loads the kernel and the ISO (about 0.5 GB, usually well under a
    minute on a gigabit network), the installer runs and, by default, reboots when done.

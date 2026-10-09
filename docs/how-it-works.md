@@ -26,7 +26,7 @@ failure code, so the firmware continues with the next boot device.
 EVE's installer looks for its installation medium again after Linux has
 started. An ISO that iPXE emulates as a SAN/CD drive is gone at that point.
 EVE's own network boot therefore puts the ISO inside the initrd and boots with
-`root=/installer.iso`. EVE-Netboot-Installer does exactly the same, but from
+`root=/installer.iso`. EVE Netboot Installer does exactly the same, but from
 iPXE instead of EVE's GRUB.
 
 The kernel command line is rebuilt per release from the ISO's own

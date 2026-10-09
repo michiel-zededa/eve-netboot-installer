@@ -1,6 +1,6 @@
-# EVE-Netboot-Installer VM appliance
+# EVE Netboot Installer VM appliance
 
-A ready-made virtual machine that runs the EVE-Netboot-Installer PXE boot
+A ready-made virtual machine that runs the EVE Netboot Installer PXE boot
 server. Download it, import it into your hypervisor, start it and answer a few
 questions on its screen. No Linux or Docker knowledge needed.
 
@@ -178,32 +178,26 @@ buttons) and **Enter**.
 
 | Step | What to enter |
 |---|---|
-| Welcome | **Set up this VM**, or **Import the settings of another EVE-Netboot VM** (see [step 9](#9-replace-the-vm-with-a-newer-version)) |
+| Language | English, Deutsch, Français, Español, Português, Nederlands, Dansk or Norsk: the language of this setup, the menu, the web management, the boot menu and the status page. |
+| Welcome | **Set up this VM**, or **Import the settings of another EVE Netboot Installer VM** (see [step 9](#9-replace-the-vm-with-a-newer-version)) |
 | Admin password | Twice, at least 8 characters. You need it for the menu and for SSH (user `admin`). |
-| Network | **Automatically (DHCP)**, or **Fixed address**: address with prefix (`192.168.1.20/24`), gateway, DNS servers. |
+| Network | **Automatically (DHCP)**, or **Fixed address (static)**: address with prefix (`192.168.1.20/24`), gateway, DNS servers. |
 | Server address | **This VM's own address** (almost always right). |
-| Language | Language of the boot menu and the status page. |
-| Mirror | Architectures of your machines, EVE-OS variants (`kvm`, and `k` with Kubernetes), and how many LTS release lines (each about 0.5 GB per architecture and variant). |
+| What to mirror | Architectures of your machines, EVE-OS variants (`kvm`, and `k` with Kubernetes), and how many LTS release lines (each about 0.5 GB per architecture and variant). |
 | Installer defaults | Your controller, for example `zedcloud.zededa.net` (empty = what is in the ISO), and the serial console of your machines. |
-| Import share | **Share it** to copy your own installer ISOs to the VM from Windows or macOS. |
+| SMB share | **Share it** to copy your own installer ISOs to the VM from Windows or macOS (a Windows/macOS file share of the import folder). |
 | Ready | Check the summary and choose **Apply**. |
 
-After about a minute the screen shows the status:
+After about a minute the screen shows the status, in the style of EVE-OS's own
+console: tabs at the top (**Status**, **Images**, **Log**; switch with the
+**arrow keys** or **Tab**), boxes with coloured states, and the keys and a clock
+at the bottom:
 
-```text
- EVE-Netboot-Installer appliance 1.4.1   (eve-netboot)
+![The status screen of the VM](../docs/images/console-status.png)
 
- VM address      192.168.1.20 (DHCP)
- Status page     http://192.168.1.20:8080/
- DHCP settings   next-server 192.168.1.20
-                 boot file   eve-x86_64.efi  (x86_64 UEFI)
-                             eve-arm64.efi   (arm64 UEFI)
- Services        sync running  tftp running  web running
- Installers      3 ready, last GitHub check 2026-10-08 12:24
- Disk            3.1 GB used, 26.9 GB free
+The *Images* tab lists every installer with its state:
 
- Press Enter to log in (user admin) and open the settings menu.
-```
+![The Images tab](../docs/images/console-images.png)
 
 Continue with [step 5](#5-point-dhcp-at-the-vm).
 
@@ -253,11 +247,11 @@ For a VM you cannot see the screen of (headless):
 
 1. Find the VM's address in your DHCP server or hypervisor.
 2. Open `https://<VM address>:8443/`. The browser warns once about the certificate: the VM makes its own (self-signed) certificate. Accept it to continue.
-3. The same steps as on the screen follow: admin password, network, server address, language, mirror, installer defaults, import share. Or start from the settings of another VM (*import*).
+3. The same steps as on the screen follow. The first page asks for the language (the page switches right away); then admin password, network, server address, what to mirror, installer defaults and SMB share. Or start from the settings of another VM: the address its console shows under *Export settings*, or the exported settings file (*Backup and restore → Export → Download* on the other VM).
 4. After **Apply and start** you are logged in to the [web management](#6-daily-use).
 
 - **Who may do this:** until the VM is set up, anyone who reaches this page can do the setup (first come, first served). Set the VM up right after deploying it, or use cloud-init.
-- **After a setup on the VM's screen** the web management is off; switch it on in the menu: *Advanced settings → Web management*.
+- **After a setup on the VM's screen** the web management is off; switch it on in the menu: *Access and system → Web management*.
 
 ---
 
@@ -282,13 +276,21 @@ first network boot of a machine.
 **In a web browser:**
 
 - `http://<VM address>:8080/` is the public side, for everyone in the network: the available images (GitHub mirror and your own ISOs) with their details, live activity such as downloads, and the DHCP and boot settings. A **Manage** button leads to the management.
-- `https://<VM address>:8443/` is the management: log in with the admin password. It adds every setting of the menu below, the logs, updates, backup and restore, the admin password, reboot and power off, plus:
+- `https://<VM address>:8443/` is the management: log in with the admin password. It has the same settings pages as the menu below (in the same groups), the logs, updates, backup and restore, the admin password, reboot and power off, plus:
   - **Upload ISO** and **Delete** on the *Images* page (no SMB or scp needed);
   - **Download diagnostics**: one file with logs, status and settings (without passwords or tokens) for troubleshooting;
   - **network changes with a safety net:** a new address must be confirmed from that address within 2 minutes, otherwise the previous settings come back by themselves.
 
 **On the VM screen** the status is always visible. Press **Enter** and type the
-admin password to open the menu.
+admin password to open the menu. The console and the web management use the
+language chosen under *Language and boot menu* (`ENI_LANGUAGE`), the same as
+the boot menu.
+
+![The menu of the VM](../docs/images/console-menu.png)
+
+Dialogs use colour to show what they are about, as in EVE-OS's console: red
+for errors and for questions that stop the server (power off), orange for
+warnings, green for success.
 
 **Over SSH:** `ssh admin@<VM address>` opens the same menu. *Command line*
 leaves it; `eve-netboot menu` brings it back.
@@ -296,12 +298,11 @@ leaves it; `eve-netboot menu` brings it back.
 | Menu item | Does |
 |---|---|
 | Status | Everything on one screen |
-| Network, Server address, What to mirror, Language, Installer defaults, Import share | Change those settings; they are applied immediately |
-| Advanced settings | HTTP port, boot menu timeout, host name, time zone, SSH password login, SSH keys, GitHub token, web management on/off, and the settings file itself |
-| Check GitHub for new EVE-OS releases now | Normally this happens once a day |
-| Show the log | The last 200 lines of the mirror's log |
+| Network, Server address, What to mirror, Language and boot menu, Installer defaults, SMB share, Access and system | The same groups of settings as the pages of the web management: a list of the settings with their values; **Enter** changes one, **Done** applies the changes |
+| Check GitHub now | Normally this happens at the set interval (every day) |
+| Logs | The mirror (sync), TFTP, web server, appliance or system log |
 | Export settings / Import settings | See [step 9](#9-replace-the-vm-with-a-newer-version) |
-| Update the system / Update EVE-Netboot-Installer | See [step 8](#8-updates) |
+| Update the system / Update EVE Netboot Installer | See [step 8](#8-updates) |
 | Change the admin password, Reboot, Power off, Command line, Log out | |
 
 The status page `http://<VM address>:8080/` lists every release and ISO the
@@ -314,7 +315,7 @@ VM offers.
 EVE installer ISOs you put in the import folder appear in the boot menu within
 a minute, for example controller-specific builds.
 
-- **Windows / macOS:** enable the import share (menu → *Import share*). Then open `\\<VM address>\eve-import` (Windows Explorer) or `smb://<VM address>/eve-import` (macOS Finder: *Go → Connect to Server*), log in as `admin` with the share password and copy the ISO there.
+- **Windows / macOS:** switch on the SMB share (menu or web management → *SMB share*). Then open `\\<VM address>\eve-import` (Windows Explorer) or `smb://<VM address>/eve-import` (macOS Finder: *Go → Connect to Server*), log in as `admin` with the share password and copy the ISO there.
 - **Web browser:** *Images → Upload ISO* in the web management (`https://<VM address>:8443/`).
 - **scp:** `scp my-installer.iso admin@<VM address>:/srv/eve-netboot/import/`
 
@@ -329,7 +330,7 @@ example `eve-k-amd64.iso`). Deleting or replacing the file updates the menu.
 |---|---|---|
 | Debian security updates | Automatically, every day | Very low: fixes within Debian 13 only |
 | All Debian updates | Menu → *Update the system* | Low: apt upgrade within Debian 13; the appliance's packages are protected against `autoremove`; the menu checks the services afterwards and offers a reboot when a new kernel was installed |
-| EVE-Netboot-Installer | Menu → *Update EVE-Netboot-Installer* | Low: if the new version does not start correctly, the previous one is restored automatically |
+| EVE Netboot Installer | Menu → *Update EVE Netboot Installer* | Low: if the new version does not start correctly, the previous one is restored automatically |
 | A new Debian release, a new appliance version | A new VM, see [step 9](#9-replace-the-vm-with-a-newer-version) | |
 
 Tip: take a snapshot of the VM before updating if your hypervisor supports it.
@@ -341,9 +342,9 @@ Tip: take a snapshot of the VM before updating if your hypervisor supports it.
 A new release of the VM image contains the newest Debian and application. To
 move to it without setting everything up again:
 
-1. **On the old VM:** menu → *Export settings*. It shows an address like `http://192.168.1.20:8080/export-3fa9c1.txt` that works for 15 minutes.
+1. **On the old VM:** web management → *Backup and restore* → *Download* gives the file `eve-netboot-settings.txt`. Or menu → *Export settings*: it shows an address like `http://192.168.1.20:8080/export-3fa9c1.txt` that works for 15 minutes, and puts the same file into the SMB share.
 2. **Create the new VM** from the new image ([step 3](#3-create-the-vm)) and start it.
-3. **On the new VM's screen:** choose **Import the settings of another EVE-Netboot VM** and type the address from step 1.
+3. **Import on the new VM:** in the web setup choose the downloaded file (or type the address). On the new VM's screen choose **Import the settings of another EVE Netboot Installer VM** and type the address, or pick the file after copying it into the new VM's SMB share.
 4. Go through the setup steps; the old values are filled in. Set the admin password (passwords are never exported).
 5. If the old VM had a **fixed address**: power the old VM off before you choose **Apply**, or the two VMs use the same address.
 6. **DHCP:** with a fixed address or `SERVER_IP` nothing changes. With DHCP, the new VM has a new MAC address: move the DHCP reservation to it, or update next-server.
@@ -359,7 +360,7 @@ custom configuration. The exported text is valid cloud-init user-data too.
 The VM keeps its settings in `/etc/eve-netboot/settings.env`. The menu changes
 them; cloud-init user-data and imports use the same names.
 
-- **`ENI_*`:** EVE-Netboot-Installer itself; **`EVE_*`:** EVE-OS (which releases are mirrored, and as `EVE_DEFAULT_*` the defaults of its installation options); the rest configure the VM.
+- **`ENI_*`:** EVE Netboot Installer itself; **`EVE_*`:** EVE-OS (which releases are mirrored, and as `EVE_DEFAULT_*` the defaults of its installation options); the rest configure the VM.
 - **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, ...). The VM converts the old names automatically, in its settings, in cloud-init user-data and in imports.
 
 Two reference files show every setting with its syntax, an explanation and
