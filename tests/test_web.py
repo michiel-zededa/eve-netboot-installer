@@ -338,5 +338,54 @@ class WebTest(unittest.TestCase):
         self.assertEqual((job["state"], job["result"]["message"], job["messages"]), ("done", "Updated.", ["Downloading ..."]))
 
 
+class CertificateTest(unittest.TestCase):
+    """The self-signed certificate must be one browsers let you accept:
+    macOS/iOS want <= 825 days and serverAuth, Firefox wants CA:FALSE."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(dir=TMP)
+        p = mock.patch.multiple(web, TLS_DIR=self.dir)
+        p.start()
+        self.addCleanup(p.stop)
+        self.ip = "192.0.2.50"
+        q = mock.patch.multiple(core, primary_ip=lambda: self.ip, log=mock.DEFAULT,
+                                read=lambda path, default="": (open(path).read() if os.path.exists(path)
+                                                               else ("vm-host\n" if path == "/etc/hostname" else default)))
+        q.start()
+        self.addCleanup(q.stop)
+
+    def text(self, cert):
+        import subprocess
+        return subprocess.run(["openssl", "x509", "-in", cert, "-noout", "-text"], capture_output=True,
+                              text=True, check=True).stdout
+
+    def test_browser_acceptable_certificate(self):
+        cert, key = web.ensure_certificate(core)
+        t = self.text(cert)
+        self.assertIn("CA:FALSE", t)
+        self.assertIn("TLS Web Server Authentication", t)
+        self.assertIn("Digital Signature", t)
+        self.assertIn("IP Address:192.0.2.50", t)
+        self.assertIn("DNS:vm-host", t)
+        import datetime
+        import subprocess
+        end = subprocess.run(["openssl", "x509", "-in", cert, "-noout", "-enddate"], capture_output=True,
+                             text=True, check=True).stdout.split("=", 1)[1].strip()
+        days = (datetime.datetime.strptime(end, "%b %d %H:%M:%S %Y %Z") - datetime.datetime.utcnow()).days
+        self.assertLessEqual(days, 825)
+        self.assertEqual(os.stat(key).st_mode & 0o777, 0o600)
+
+    def test_kept_while_valid_and_replaced_when_not(self):
+        cert, _ = web.ensure_certificate(core)
+        first = open(cert).read()
+        self.assertEqual(open(web.ensure_certificate(core)[0]).read(), first)       # kept
+        self.ip = "192.0.2.77"                                                        # address changed
+        second = open(web.ensure_certificate(core)[0]).read()
+        self.assertNotEqual(second, first)
+        self.assertIn("IP Address:192.0.2.77", self.text(cert))
+        os.remove(os.path.join(self.dir, "profile"))                                  # made by 1.4.0
+        self.assertNotEqual(open(web.ensure_certificate(core)[0]).read(), second)
+
+
 if __name__ == "__main__":
     unittest.main()

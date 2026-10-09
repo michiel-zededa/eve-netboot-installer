@@ -421,7 +421,7 @@ the default value. Both work as they are, as cloud-init user-data:
 | VM address *none* | No DHCP answer: check that the VM is on a bridged/switch network; or set a fixed address (menu → *Network*). |
 | PXE client: *PXE-E32 TFTP open timeout* | DHCP next-server is the VM's address? The VM is not behind NAT? Menu → *Show the log*; `curl -s tftp://<VM address>/boot.ipxe` from another machine. |
 | Installers *0 ready* | The first download is still running (menu → *Show the log*), or the VM has no internet access. |
-| The browser warns about the certificate on port 8443 | Expected: the VM makes its own certificate. Accept it once for this address. |
+| The browser warns about the certificate on port 8443 | Expected: the VM makes its own certificate. Accept it once for this address (Safari: *Show Details → visit this website*; Chrome: *Advanced → Proceed*; Firefox: *Advanced → Accept the Risk*). |
 | Port 8443 does not answer | Web management is off after a setup on the VM's screen: menu → *Advanced settings → Web management*. |
 | After a network change in the browser the page is gone | Open the new address within 2 minutes and confirm there; otherwise the previous settings come back by themselves. |
 | Forgot the admin password | Log in with an SSH key if you set one, or deploy a new VM and import the settings ([step 9](#9-replace-the-vm-with-a-newer-version)). |

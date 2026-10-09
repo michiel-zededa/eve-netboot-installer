@@ -641,22 +641,48 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # --------------------------------------------------------------------------
 # start
 # --------------------------------------------------------------------------
+# Browsers only offer "accept the risk" for self-signed certificates that
+# otherwise follow the rules; anything else is a hard error:
+# - macOS / iOS (Safari, and Chrome through the macOS checks): at most 825
+#   days valid and an extendedKeyUsage of serverAuth
+# - Firefox: no CA certificate as the server certificate (CA:FALSE)
+CERT_DAYS = 825
+CERT_RENEW_DAYS = 30
+CERT_PROFILE = "2"   # bump to replace certificates made by an older version
+
+
+def certificate_ok(core, cert, ip):
+    """True when cert is ours, current, valid for a while and names ip."""
+    if core.read(os.path.join(TLS_DIR, "profile")).strip() != CERT_PROFILE:
+        return False
+    p = subprocess.run(["openssl", "x509", "-in", cert, "-noout", "-checkend", str(CERT_RENEW_DAYS * 86400),
+                        "-ext", "subjectAltName"], capture_output=True, text=True)
+    if p.returncode != 0:
+        return False       # expires soon, or unreadable
+    return not ip or f"IP Address:{ip}" in p.stdout
+
+
 def ensure_certificate(core):
     cert, key = os.path.join(TLS_DIR, "cert.pem"), os.path.join(TLS_DIR, "key.pem")
-    if os.path.exists(cert) and os.path.exists(key):
+    ip = core.primary_ip()
+    if os.path.exists(cert) and os.path.exists(key) and certificate_ok(core, cert, ip):
         return cert, key
     os.makedirs(TLS_DIR, mode=0o700, exist_ok=True)
     host = core.read("/etc/hostname").strip() or "eve-netboot"
-    san = f"DNS:{host}"
-    ip = core.primary_ip()
-    if ip:
-        san += f",IP:{ip}"
+    san = f"DNS:{host}" + (f",IP:{ip}" if ip else "")
     subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-                    "-sha256", "-days", "3650", "-nodes", "-keyout", key, "-out", cert,
-                    "-subj", f"/CN={host}/O=EVE-Netboot-Installer", "-addext", f"subjectAltName={san}"],
+                    "-sha256", "-days", str(CERT_DAYS), "-nodes", "-keyout", key + ".new", "-out", cert + ".new",
+                    "-subj", f"/CN={host}/O=EVE-Netboot-Installer",
+                    "-addext", f"subjectAltName={san}",
+                    "-addext", "basicConstraints=critical,CA:FALSE",
+                    "-addext", "keyUsage=critical,digitalSignature",
+                    "-addext", "extendedKeyUsage=serverAuth"],
                    check=True, capture_output=True)
-    os.chmod(key, 0o600)
-    core.log("web: created a self-signed certificate")
+    os.chmod(key + ".new", 0o600)
+    os.replace(key + ".new", key)
+    os.replace(cert + ".new", cert)
+    core.write(os.path.join(TLS_DIR, "profile"), CERT_PROFILE + "\n", 0o600)
+    core.log(f"web: created a self-signed certificate for {san}")
     return cert, key
 
 
