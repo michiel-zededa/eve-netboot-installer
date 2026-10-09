@@ -401,9 +401,10 @@ class CertificateTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.ip = "192.0.2.50"
+        # the host name of the VM, not of the machine running the tests
         q = mock.patch.multiple(core, primary_ip=lambda: self.ip, log=mock.DEFAULT,
-                                read=lambda path, default="": (open(path).read() if os.path.exists(path)
-                                                               else ("vm-host\n" if path == "/etc/hostname" else default)))
+                                read=lambda path, default="": ("vm-host\n" if path == "/etc/hostname" else
+                                                               open(path).read() if os.path.exists(path) else default))
         q.start()
         self.addCleanup(q.stop)
 
