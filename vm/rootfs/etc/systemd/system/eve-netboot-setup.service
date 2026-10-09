@@ -1,5 +1,5 @@
 [Unit]
-Description=EVE-Netboot-Installer appliance: apply settings and start the stack
+Description=EVE Netboot Installer appliance: apply settings and start the stack
 # after cloud-init has fetched the user-data and applied users/passwords (when
 # the hypervisor passes any). Not cloud-final.service: that one runs after
 # multi-user.target, which waits for this unit (ordering cycle).

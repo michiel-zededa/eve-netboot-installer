@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { CircleAlert, CircleCheck, Loader, X } from "lucide-react";
 import { api, ApiError, waitJob, type SaveResult, type SettingsInfo } from "./admin";
+import { useT } from "./i18n";
 
 // ---------------------------------------------------------------------------
 // Field definitions: shared by the settings pages and the web setup
@@ -14,6 +15,7 @@ export interface Field {
   help?: string;
   placeholder?: string;
   options?: [string, string][];      // value, label
+  values?: string[];                 // options whose labels come from the translations
   showIf?: (v: Values) => boolean;
   wide?: boolean;
 }
@@ -30,6 +32,7 @@ export function value(v: Values, info: SettingsInfo | null, key: string): string
 export function FieldInput({ field, v, info, set }: {
   field: Field; v: Values; info: SettingsInfo | null; set: (key: string, value: string) => void;
 }) {
+  const t = useT();
   const val = value(v, info, field.key);
   const id = `f-${field.key}`;
   let control: ReactNode;
@@ -48,7 +51,7 @@ export function FieldInput({ field, v, info, set }: {
         <label className="switch">
           <input id={id} type="checkbox" checked={val === on} onChange={(e) => set(field.key, e.target.checked ? on : off)} />
           <span className="switch-track" />
-          <span>{val === on ? "On" : "Off"}</span>
+          <span>{val === on ? t("adm_on") : t("adm_off")}</span>
         </label>
       );
       break;
@@ -131,6 +134,7 @@ export type SaveState =
   | { phase: "rollback"; result: SaveResult };
 
 export function useSaver(onDone?: () => void) {
+  const t = useT();
   const [state, setState] = useState<SaveState>({ phase: "idle" });
   const save = async (changes: Values) => {
     const { settings, secrets } = splitChanges(changes);
@@ -143,8 +147,8 @@ export function useSaver(onDone?: () => void) {
         return;
       }
       const job = await waitJob(result.job, (messages) => setState({ phase: "saving", messages }));
-      if (job.state === "failed") throw new Error(job.messages.at(-1) ?? "Failed.");
-      setState({ phase: "done", message: "Saved and applied." });
+      if (job.state === "failed") throw new Error(job.messages.at(-1) ?? t("adm_failed"));
+      setState({ phase: "done", message: t("adm_saved") });
       onDone?.();
     } catch (e) {
       setState({ phase: "error", message: e instanceof Error ? e.message : String(e) });
@@ -154,8 +158,9 @@ export function useSaver(onDone?: () => void) {
 }
 
 export function SaveStatus({ state }: { state: SaveState }) {
+  const t = useT();
   if (state.phase === "saving") {
-    return <span className="save-status"><Loader size={16} className="spin" /> {state.messages.at(-1) ?? "Saving ..."}</span>;
+    return <span className="save-status"><Loader size={16} className="spin" /> {state.messages.at(-1) ?? t("adm_saving")}</span>;
   }
   if (state.phase === "done") return <span className="save-status ok"><CircleCheck size={16} /> {state.message}</span>;
   if (state.phase === "error") return <span className="save-status err"><CircleAlert size={16} /> {state.message}</span>;
@@ -163,6 +168,7 @@ export function SaveStatus({ state }: { state: SaveState }) {
 }
 
 export function RollbackDialog({ result, onClose }: { result: SaveResult; onClose: () => void }) {
+  const t = useT();
   const rb = result.rollback!;
   const [left, setLeft] = useState(rb.seconds);
   const [confirmed, setConfirmed] = useState(false);
@@ -180,25 +186,22 @@ export function RollbackDialog({ result, onClose }: { result: SaveResult; onClos
     }
   };
   return (
-    <Modal title="Network change" onClose={onClose}>
+    <Modal title={t("adm_rb_title")} onClose={onClose}>
       {confirmed ? (
-        <p>The new network settings are kept.</p>
+        <p>{t("adm_rb_kept")}</p>
       ) : (
         <>
-          <p>
-            The network settings are being applied. If the VM cannot be reached at its new address and you do not
-            confirm within <b>{left} seconds</b>, the previous settings come back automatically.
-          </p>
+          <p>{t("adm_rb_text", { seconds: left })}</p>
           {rb.confirm_url ? (
             <p>
-              Open the new address and confirm there (the browser warns once about the certificate):<br />
+              {t("adm_rb_open_new")}<br />
               <a className="btn primary" href={rb.confirm_url}>{rb.confirm_url.split("#")[0]}</a>
             </p>
           ) : (
-            <p>With DHCP the new address is given by your DHCP server; it is shown on the VM's screen.</p>
+            <p>{t("adm_rb_dhcp")}</p>
           )}
-          <p className="muted small">Still reachable at this address?</p>
-          <button className="btn" onClick={confirmHere}>Keep the new settings</button>
+          <p className="muted small">{t("adm_rb_still_here")}</p>
+          <button className="btn" onClick={confirmHere}>{t("adm_rb_keep")}</button>
         </>
       )}
     </Modal>
@@ -211,6 +214,7 @@ export function RollbackDialog({ result, onClose }: { result: SaveResult; onClos
 export function Modal({ title, onClose, children, actions }: {
   title: string; onClose: () => void; children: ReactNode; actions?: ReactNode;
 }) {
+  const t = useT();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -222,7 +226,7 @@ export function Modal({ title, onClose, children, actions }: {
       <div className="modal">
         <div className="drawer-head">
           <h2>{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={20} /></button>
+          <button className="icon-btn" onClick={onClose} aria-label={t("ui_close")}><X size={20} /></button>
         </div>
         <div className="modal-body">{children}</div>
         {actions && <div className="modal-actions">{actions}</div>}
@@ -234,10 +238,11 @@ export function Modal({ title, onClose, children, actions }: {
 export function Confirm({ title, text, confirm, danger, onConfirm, onClose }: {
   title: string; text: ReactNode; confirm: string; danger?: boolean; onConfirm: () => void; onClose: () => void;
 }) {
+  const t = useT();
   return (
     <Modal title={title} onClose={onClose} actions={
       <>
-        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn" onClick={onClose}>{t("adm_btn_cancel")}</button>
         <button className={`btn ${danger ? "danger" : "primary"}`} onClick={() => { onConfirm(); onClose(); }}>
           {confirm}
         </button>

@@ -1,4 +1,4 @@
-# EVE-Netboot-Installer
+# EVE Netboot Installer
 
 PXE/iPXE boot server for LF Edge EVE-OS installers, shipped as one Docker image
 in three compose roles (`sync`, `tftp`, `web`). See README.md for users and
@@ -12,6 +12,10 @@ docs/how-it-works.md for the boot chain.
 - `app/i18n/<lang>.json`: menu/status texts, `@@key@@` placeholders in templates.
   `en.json` is the fallback. Files are `indent=1`, `ensure_ascii=False`, no
   trailing newline. Every language must have the same keys as `en.json`.
+  `adm_*` keys are the texts of the appliance's console and web management
+  (`{name}` placeholders), shared: a setting's label/help/options are
+  `adm_f_/adm_h_/adm_o_/adm_p_<key>` in both. ENI_LANGUAGE is the language of
+  the tool itself too.
 - `docker/`: iPXE build (from source, x86_64 + arm64 EFI), generic embedded
   script, entrypoint that selects the role.
 - `vm/`: the VM appliance (Debian 13 + Docker from Debian + the app image).
@@ -91,6 +95,10 @@ and the UI type check + build.
   only until configured. Never name a Handler method like a
   BaseHTTPRequestHandler/StreamRequestHandler one (`setup`, `handle`, `finish`
   ...): `setup()` silently broke every request once.
+- Console and web management are functionally equal: the same settings in the
+  same groups (`SECTIONS` in eve-netboot == `ui/src/sections.ts`, tested). A
+  change in one belongs in the other. The look of the console and the iPXE menu
+  follows EVE-OS's own console (black, inverted selection, coloured states).
 - Appliance: the console shows only status without login; the menu needs the
   admin password. Without cloud-init settings nothing starts until the setup
   is done. Passwords (ADMIN_PASSWORD, SMB_PASSWORD) are applied and never

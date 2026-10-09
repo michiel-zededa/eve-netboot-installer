@@ -1,5 +1,5 @@
 [Unit]
-Description=EVE-Netboot-Installer appliance console (setup and status on tty1)
+Description=EVE Netboot Installer console (setup and status on tty1)
 After=systemd-user-sessions.service plymouth-quit-wait.service
 Conflicts=getty@tty1.service
 
@@ -12,7 +12,7 @@ TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
-Environment=TERM=linux
+Environment=TERM=linux LANG=C.UTF-8
 Restart=always
 RestartSec=1
 

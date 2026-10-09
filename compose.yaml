@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
-# EVE-Netboot-Installer
+# EVE Netboot Installer
 #   PXE boot server that offers LF Edge EVE-OS installers: the newest GitHub
 #   LTS releases (mirrored locally) plus your own installer ISOs.
 #
 #   All settings live in .env  ->  cp .env.example .env  and set SERVER_IP.
-#   ENI_* = EVE-Netboot-Installer itself; EVE_* = EVE-OS (which releases are
+#   ENI_* = EVE Netboot Installer itself; EVE_* = EVE-OS (which releases are
 #   mirrored, EVE_DEFAULT_* = defaults of its installation options). The
 #   pre-1.3 names of the ENI_* settings (EVE_LANGUAGE, ...) still work.
 #   Then:  docker compose up -d   (builds the image on first start, ~5 min)

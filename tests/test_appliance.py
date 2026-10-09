@@ -125,6 +125,98 @@ class ValidateTest(unittest.TestCase):
         # empty means "use the default"
         self.assertEqual(app.validate({"EVE_ARCHES": ""}), [])
         self.assertEqual(app.validate({"EVE_ARCHES": "amd64 arm64", "EVE_FLAVOURS": "kvm k"}), [])
+        for bad in ({"EVE_LTS_LINES": "0"}, {"EVE_LTS_LINES": "11"}, {"ENI_MENU_TIMEOUT": "soon"},
+                    {"TZ": "Mars/Olympus"}):
+            with self.subTest(bad=bad):
+                self.assertTrue(app.validate(bad))
+
+
+class TextsTest(unittest.TestCase):
+    """The console and the web management speak ENI_LANGUAGE (app/i18n)."""
+
+    def tearDown(self):
+        app.set_language(None)
+        app.use_language(None)
+
+    def test_language_and_fallback(self):
+        app.set_language("nl")
+        self.assertNotEqual(app.tr("adm_sec_network"), app.texts("en")["adm_sec_network"])
+        self.assertEqual(app.tr("adm_no_such_key"), "adm_no_such_key")
+        app.set_language(None)
+        self.assertEqual(app.tr("adm_pw_too_short", n=8), "The password needs at least 8 characters.")
+
+    def test_thread_language_wins(self):
+        app.set_language("de")
+        app.use_language("fr")
+        self.assertEqual(app.language(), "fr")
+        app.use_language("xx")          # unknown: back to the saved one
+        self.assertEqual(app.language(), "de")
+
+    def test_errors_belong_to_a_setting(self):
+        s = {"NET_MODE": "static", "NET_ADDRESS": "nonsense", "SERVER_IP": "host.example"}
+        self.assertEqual({k for k, _ in app.problems(s)}, {"NET_ADDRESS", "SERVER_IP"})
+        self.assertEqual(len(app.validate(s, ("SERVER_IP",))), 1)
+        self.assertEqual(app.validate(s, ("HOSTNAME",)), [])
+
+    def test_every_setting_has_texts_in_every_language(self):
+        for lang, _ in app.LANGUAGES:
+            texts = app.texts(lang)
+            for key in app.FIELDS:
+                with self.subTest(lang=lang, key=key):
+                    self.assertIn("adm_f_" + key.lower(), texts)
+            for section in app.SECTIONS:
+                with self.subTest(lang=lang, section=section):
+                    self.assertIn("adm_sec_" + section, texts)
+                    self.assertIn("adm_sec_" + section + "_text", texts)
+
+    def test_console_and_web_have_the_same_settings(self):
+        with open(os.path.join(HERE, "..", "ui", "src", "sections.ts"), encoding="utf-8") as f:
+            ts = f.read()
+        web = {}
+        for block in re.split(r'\n  \{\n    id: "', ts)[1:]:
+            web[block.split('"', 1)[0]] = re.findall(r'field\(t, "([A-Z0-9_]+)"', block)
+        self.assertEqual(web, app.SECTIONS)
+
+    def test_status_screen_fits(self):
+        info = {"version": "1.5.0", "hostname": "eve-netboot", "configured": True, "ip": "192.0.2.20",
+                "server_ip": "192.0.2.20", "net_mode": "dhcp", "status_url": "http://192.0.2.20:8080/",
+                "web_admin": "https://192.0.2.20:8443/", "smb_share": "\\\\192.0.2.20\\eve-import",
+                "reboot_required": True, "last_error": "x" * 300,
+                "services": {"sync": "running", "tftp": "running", "web": "exited"},
+                "entries": [{"source": "github", "tag": f"16.0.{i}-lts", "arch": "amd64", "variant": "kvm",
+                             "netboot_ok": True} for i in range(40)] +
+                           [{"source": "local", "file": "a-very-long-file-name-" * 4 + ".iso", "error": "bad"}],
+                "ready": 40, "github_checked": "2026-10-09 20:33", "activity": {"state": "downloading",
+                                                                                 "item": "17.0.0", "percent": 40},
+                "disk_used": 6.2, "disk_free": 9.3}
+        for lang, _ in app.LANGUAGES:
+            app.set_language(lang)
+            for tab in range(len(app.TABS)):
+                for cols, lines in ((80, 25), (132, 43)):
+                    with self.subTest(lang=lang, tab=tab, cols=cols):
+                        screen = app.dashboard(tab, info, cols, lines)
+                        self.assertEqual(len(screen), lines)
+                        self.assertLessEqual(max(app.width_of(x) for x in screen), cols)
+        app.set_language("en")
+        screen = "".join(app.dashboard(0, info, 80, 25))
+        self.assertIn("\x1b[1;31mexited", screen)                     # states in colour
+        self.assertIn("\x1b[36mhttp://192.0.2.20:8080/", screen)      # addresses like links
+        self.assertIn("\x1b[30;47m Enter \x1b[0m: log in", screen)    # keys highlighted
+
+
+class DefaultsTest(unittest.TestCase):
+
+    def test_shown_defaults_are_those_of_the_stack(self):
+        # what the console and web show for an unset setting is what eve_sync uses
+        with open(os.path.join(HERE, "..", ".env.example"), encoding="utf-8") as f:
+            example = app.parse_env(f.read())
+        for key, value in app.DEFAULTS.items():
+            if example.get(key) and key != "SERVER_IP":    # an example address there; "auto" here
+                with self.subTest(key=key):
+                    self.assertEqual(value, example[key])
+        for key in ("EVE_DEFAULT_REBOOT", "EVE_DEFAULT_SOFT_SERIAL", "EVE_DEFAULT_NUKE_ALL_DISKS",
+                    "ENI_SYNC_INTERVAL", "ENI_MENU_MODE"):
+            self.assertIn(key, app.DEFAULTS)
 
 
 class VersionTest(unittest.TestCase):

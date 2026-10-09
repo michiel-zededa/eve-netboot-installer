@@ -14,6 +14,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import tarfile
 import tempfile
 import threading
@@ -154,6 +155,22 @@ class WebTest(unittest.TestCase):
             status, body, _ = self.request("GET", path)
             self.assertEqual(status, 404, path)
 
+    def test_folders_of_the_web_root_are_listed(self):
+        rel = os.path.join(self.www, "eve", "releases", "16.0.0")
+        os.makedirs(rel)
+        for name in ("kernel", "<b>.cfg"):
+            with open(os.path.join(rel, name), "w") as f:
+                f.write("x")
+        status, _, r = self.request("GET", "/eve/releases/16.0.0")
+        self.assertEqual((status, r.getheader("Location")), (301, "/eve/releases/16.0.0/"))
+        status, page, r = self.request("GET", "/eve/releases/16.0.0/")
+        self.assertEqual(status, 200)
+        self.assertTrue(r.getheader("Content-Type").startswith("text/html"))
+        self.assertIn(b'<a href="kernel">kernel</a>', page)
+        self.assertIn(b"&lt;b&gt;.cfg", page)          # names are escaped
+        self.assertNotIn(b"<b>", page)
+        self.assertEqual(self.request("GET", "/")[1], b"<html>ui</html>")   # the UI itself, not a listing
+
     def test_ui_from_the_vm_copy_before_the_stack_ever_ran(self):
         os.remove(os.path.join(self.www, "index.html"))
         lib = tempfile.mkdtemp(dir=TMP)
@@ -186,6 +203,24 @@ class WebTest(unittest.TestCase):
                              ("POST", "/api/settings"), ("POST", "/api/actions/reboot"), ("DELETE", "/api/images")):
             status, _, _ = self.request(method, path, {} if method != "GET" else None)
             self.assertEqual(status, 401, path)
+
+    def test_texts_in_any_language_also_before_the_setup(self):
+        status, body, _ = self.request("GET", "/api/texts?lang=de")
+        self.assertEqual((status, body["language"]), (200, "de"))
+        self.assertEqual(body["texts"]["adm_sec_network"], core.texts("de")["adm_sec_network"])
+        status, body, _ = self.request("GET", "/api/texts")
+        self.assertEqual(body["language"], "en")                     # the saved one
+        # the stack's copy (newer after an app update) wins for its language
+        with open(os.path.join(self.www, "eve", "ui.json"), "w") as f:
+            json.dump({"language": "en", "texts": {"adm_sec_network": "Netzwerk (neu)"}}, f)
+        self.assertEqual(self.request("GET", "/api/texts?lang=en")[1]["texts"]["adm_sec_network"], "Netzwerk (neu)")
+        self.assertNotEqual(self.request("GET", "/api/texts?lang=nl")[1]["texts"]["adm_sec_network"], "Netzwerk (neu)")
+
+    def test_answers_in_the_language_of_the_browser(self):
+        self.configure()
+        status, body, _ = self.request("POST", "/api/actions/sync", {}, headers={"X-ENI-Lang": "fr"})
+        self.assertEqual((status, body["error"]), (401, core.texts("fr")["adm_api_login"]))
+        self.assertEqual(self.request("POST", "/api/actions/sync", {})[1]["error"], "Please log in.")
 
     def test_wrong_passwords_lock_out(self):
         self.configure()
@@ -326,10 +361,28 @@ class WebTest(unittest.TestCase):
         self.assertIn("eve-netboot-diagnostics/settings-export.txt", names)
         self.assertNotIn(b"ghp_secret", everything)
 
+    def test_answer_is_not_lost_when_the_body_is_not_needed(self):
+        # The server answers 401 without needing the body. Unless it still reads
+        # it, closing the connection resets it and the browser loses the answer
+        # ("Failed to fetch").
+        body = b"x" * (4 << 20)
+        with socket.create_connection(("127.0.0.1", self.server.server_address[1]), timeout=10) as sock:
+            sock.sendall(b"POST /api/upload?name=a.iso HTTP/1.1\r\nHost: x\r\nX-ENI: 1\r\n"
+                         + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+            answer = b""
+            while chunk := sock.recv(65536):
+                answer += chunk
+        self.assertTrue(answer.startswith(b"HTTP/1.0 401"), answer[:80])
+        self.assertIn(b"Please log in.", answer)
+
     def test_actions(self):
         self.configure()
         self.login()
         self.assertEqual(self.request("POST", "/api/actions/sync", {})[0], 200)
+        for _ in range(100):    # the restart runs in the background
+            if self.mocks["compose"].called:
+                break
+            pause(0.02)
         self.mocks["compose"].assert_called_with("restart", "sync", check=False)
         self.assertEqual(self.request("POST", "/api/actions/format-disk", {})[0], 404)
         with mock.patch.object(core, "update_app", lambda say: (say("Downloading ..."), (True, "Updated."))[1]):

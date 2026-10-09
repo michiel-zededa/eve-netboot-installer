@@ -1,4 +1,4 @@
-// EVE-Netboot-Installer appliance: install Debian security updates every day
+// EVE Netboot Installer appliance: install Debian security updates every day
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";

@@ -136,6 +136,20 @@ class MenuTest(unittest.TestCase):
         self.assertTrue(m.isascii())
         self.assertNotIn("@@", m)
 
+    def test_eve_console_colours(self):
+        # light text on black with an inverted selection, like EVE-OS's own console
+        m = self.render()
+        self.assertIn("cpair --foreground 7 --background 0 1\n", m)
+        self.assertIn("cpair --foreground 0 --background 7 2\n", m)
+        self.assertIn("menu EVE Netboot Installer  -  ", m)
+        exit_ = m.split(":eve_exit\n", 1)[1]
+        self.assertNotIn("cpair", exit_)          # standalone: the machine boots on
+        with mock.patch.object(eve_sync, "STANDALONE", False):
+            exit_ = self.render().split(":eve_exit\n", 1)[1]
+        # chained: the calling iPXE menu gets iPXE's own colours back
+        self.assertTrue(exit_.startswith("cpair --foreground 9 --background 9 0\n"
+                                         "cpair --foreground 7 --background 4 1\n"), exit_)
+
     def test_goto_targets_exist(self):
         m = self.render()
         labels = re.findall(r"^:(\S+)", m, re.M)
@@ -250,7 +264,7 @@ class WebUiTest(unittest.TestCase):
     def test_without_built_ui_the_simple_page_is_written(self):
         with mock.patch.object(eve_sync, "UI_DIR", os.path.join(TMP, "no-ui")):
             eve_sync.write_menus()
-        self.assertIn("EVE-Netboot-Installer", self.read_asset("index.html"))
+        self.assertIn("EVE Netboot Installer", self.read_asset("index.html"))
 
     def test_status_and_texts_for_the_ui(self):
         eve_sync.write_menus()

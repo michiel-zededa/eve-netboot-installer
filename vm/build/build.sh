@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Builds the EVE-Netboot-Installer VM appliance from the Debian 13 cloud image.
+# Builds the EVE Netboot Installer VM appliance from the Debian 13 cloud image.
 #
 #   vm/build/build.sh --arch amd64|arm64 --version 1.4.1 [options]
 #

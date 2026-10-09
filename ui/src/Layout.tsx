@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Archive, ChevronDown, CloudDownload, Disc3, Download, FolderInput, HardDrive, House, KeyRound, Languages, Layers,
+  Archive, ChevronDown, CloudDownload, Disc3, Download, HardDrive, House, KeyRound, Languages, Layers,
   LogOut, Menu, Monitor, Moon, Network, RefreshCw, ScrollText, Search, Server, Settings2, Share2, ShieldCheck, Sun,
   Wrench, X,
 } from "lucide-react";
 import type { Session } from "./admin";
 import type { Status } from "./api";
 import { href, type Route } from "./App";
-import { useT } from "./i18n";
+import { PRODUCT, useT } from "./i18n";
 import { getTheme, setTheme, type Theme } from "./theme";
 
 interface Props {
@@ -40,23 +40,19 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
 
   useEffect(() => setNavOpen(false), [route]);
 
-  const counts = { all: 0, github: 0, local: 0 };
-  for (const e of status?.entries ?? []) {
-    counts.all++;
-    counts[e.source]++;
-  }
+  const count = status?.entries.length ?? 0;
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
   return (
     <div className="shell">
       <header className="topbar">
-        <button className="icon-btn nav-toggle" aria-label="Menu" onClick={() => setNavOpen(!navOpen)}>
+        <button className="icon-btn nav-toggle" aria-label={t("adm_menu")} onClick={() => setNavOpen(!navOpen)}>
           {navOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
         <a className="brand" href="#/" aria-label="ZEDEDA">
           <span className="logo" />
         </a>
-        <div className="product">EVE-Netboot-Installer</div>
+        <div className="product">{PRODUCT}</div>
         <label className="search">
           <Search size={18} />
           <input
@@ -88,14 +84,8 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
         </div>
         <nav>
           <NavItem to={{ page: "home" }} route={route} icon={<House size={20} />} label={t("ui_nav_home")} />
-          <NavGroup label={t("ui_section_images")}>
-            <NavItem to={{ page: "images", tab: "all" }} route={route} icon={<Layers size={20} />}
-              label={t("ui_nav_all")} count={counts.all} />
-            <NavItem to={{ page: "images", tab: "github" }} route={route} icon={<CloudDownload size={20} />}
-              label={t("ui_nav_github")} count={counts.github} />
-            <NavItem to={{ page: "images", tab: "local" }} route={route} icon={<FolderInput size={20} />}
-              label={t("ui_nav_local")} count={counts.local} />
-          </NavGroup>
+          <NavItem to={{ page: "images", tab: "all" }} route={route} icon={<Layers size={20} />}
+            label={t("ui_section_images")} count={count} />
           <NavGroup label={t("ui_section_network_boot")}>
             <NavItem to={{ page: "boot" }} route={route} icon={<Network size={20} />} label={t("ui_nav_boot")} />
             <a className="nav-item" href="eve/" target="_blank" rel="noreferrer">
@@ -105,26 +95,26 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
           </NavGroup>
           {session?.authenticated && (
             <>
-              <NavGroup label="Settings">
-                <NavItem to={{ page: "settings", section: "network" }} route={route} icon={<Network size={20} />} label="Network" />
-                <NavItem to={{ page: "settings", section: "server" }} route={route} icon={<Server size={20} />} label="Server address" />
-                <NavItem to={{ page: "settings", section: "mirror" }} route={route} icon={<CloudDownload size={20} />} label="What to mirror" />
-                <NavItem to={{ page: "settings", section: "bootmenu" }} route={route} icon={<Languages size={20} />} label="Boot menu" />
-                <NavItem to={{ page: "settings", section: "defaults" }} route={route} icon={<HardDrive size={20} />} label="Installer defaults" />
-                <NavItem to={{ page: "settings", section: "share" }} route={route} icon={<Share2 size={20} />} label="Import share" />
-                <NavItem to={{ page: "settings", section: "access" }} route={route} icon={<ShieldCheck size={20} />} label="Access and system" />
+              <NavGroup label={t("adm_nav_settings")}>
+                <NavItem to={{ page: "settings", section: "network" }} route={route} icon={<Network size={20} />} label={t("adm_sec_network")} />
+                <NavItem to={{ page: "settings", section: "server" }} route={route} icon={<Server size={20} />} label={t("adm_sec_server")} />
+                <NavItem to={{ page: "settings", section: "mirror" }} route={route} icon={<CloudDownload size={20} />} label={t("adm_sec_mirror")} />
+                <NavItem to={{ page: "settings", section: "bootmenu" }} route={route} icon={<Languages size={20} />} label={t("adm_sec_bootmenu")} />
+                <NavItem to={{ page: "settings", section: "defaults" }} route={route} icon={<HardDrive size={20} />} label={t("adm_sec_defaults")} />
+                <NavItem to={{ page: "settings", section: "share" }} route={route} icon={<Share2 size={20} />} label={t("adm_sec_share")} />
+                <NavItem to={{ page: "settings", section: "access" }} route={route} icon={<ShieldCheck size={20} />} label={t("adm_sec_access")} />
               </NavGroup>
-              <NavGroup label="Maintenance">
-                <NavItem to={{ page: "logs" }} route={route} icon={<ScrollText size={20} />} label="Logs" />
-                <NavItem to={{ page: "updates" }} route={route} icon={<Download size={20} />} label="Updates" />
-                <NavItem to={{ page: "backup" }} route={route} icon={<Archive size={20} />} label="Backup and restore" />
-                <NavItem to={{ page: "system" }} route={route} icon={<Wrench size={20} />} label="System" />
+              <NavGroup label={t("adm_nav_maintenance")}>
+                <NavItem to={{ page: "logs" }} route={route} icon={<ScrollText size={20} />} label={t("adm_nav_logs")} />
+                <NavItem to={{ page: "updates" }} route={route} icon={<Download size={20} />} label={t("adm_nav_updates")} />
+                <NavItem to={{ page: "backup" }} route={route} icon={<Archive size={20} />} label={t("adm_nav_backup")} />
+                <NavItem to={{ page: "system" }} route={route} icon={<Wrench size={20} />} label={t("adm_nav_system")} />
               </NavGroup>
             </>
           )}
         </nav>
         <div className="side-foot">
-          {status?.config.version ? t("ui_version", { v: status.config.version }) : "EVE-Netboot-Installer"}
+          {status?.config.version ? t("ui_version", { v: status.config.version }) : PRODUCT}
         </div>
       </aside>
       {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
@@ -136,12 +126,12 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
 
 function sameRoute(a: Route, b: Route) {
   if (a.page !== b.page) return false;
-  if (a.page === "images" && b.page === "images") return a.tab === b.tab;
   if (a.page === "settings" && b.page === "settings") return a.section === b.section;
   return true;
 }
 
 function UserMenu({ hostname, version, onLogout }: { hostname: string; version: string; onLogout?: () => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -154,7 +144,7 @@ function UserMenu({ hostname, version, onLogout }: { hostname: string; version: 
   }, [open]);
   return (
     <div className="menu-wrap" ref={ref}>
-      <button className="avatar" aria-label="Account" aria-expanded={open} onClick={() => setOpen(!open)}>AD</button>
+      <button className="avatar" aria-label={t("adm_account")} aria-expanded={open} onClick={() => setOpen(!open)}>AD</button>
       {open && (
         <div className="menu account" role="menu">
           <div className="account-head">
@@ -164,11 +154,11 @@ function UserMenu({ hostname, version, onLogout }: { hostname: string; version: 
               <div className="muted small">{hostname}</div>
             </div>
           </div>
-          <a className="menu-item" href="#/system" onClick={() => setOpen(false)}><KeyRound size={17} /> <span>Change password</span></a>
+          <a className="menu-item" href="#/system" onClick={() => setOpen(false)}><KeyRound size={17} /> <span>{t("adm_change_password")}</span></a>
           <button className="menu-item danger" onClick={() => { setOpen(false); onLogout?.(); }}>
-            <LogOut size={17} /> <span>Sign out</span>
+            <LogOut size={17} /> <span>{t("adm_logout")}</span>
           </button>
-          <div className="menu-foot">Appliance version ( {version} )</div>
+          <div className="menu-foot">{t("adm_appliance_version", { v: version })}</div>
         </div>
       )}
     </div>

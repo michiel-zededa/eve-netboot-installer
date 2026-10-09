@@ -1,4 +1,4 @@
-/* EVE-Netboot-Installer UI, in the look of the ZEDEDA product UI:
+/* EVE Netboot Installer UI, in the look of the ZEDEDA product UI:
    light page, white cards, purple accent, sidebar with sections,
    status pills. Light / dark / system themes. */
 
@@ -375,6 +375,7 @@ input:focus, textarea:focus, select:focus { outline: 0; border-color: var(--acce
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
+.field select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 .field-label { font-size: 13px; font-weight: 600; color: var(--text); }
 .field-help { font-size: 13px; color: var(--muted); }
 .err-text { color: var(--err); }
@@ -452,6 +453,11 @@ a.menu-item { color: var(--text); }
 .setup .fields { margin-top: 20px; }
 .welcome { margin-top: 20px; }
 .welcome .field-label { display: block; margin: 0 0 6px; }
+.welcome select, .welcome input { width: 100%; }
+.welcome .btn.block + .field-label, .welcome input + .btn, .welcome .file-pick { margin-top: 12px; }
+.lang-pick { display: flex; align-items: center; gap: 10px; margin: 0 0 22px; }
+.lang-pick select { flex: 1; }
+.file-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .divider { display: flex; align-items: center; gap: 12px; margin: 26px 0 16px; color: var(--muted); font-size: 13px; }
 .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 

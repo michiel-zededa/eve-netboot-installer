@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- EVE-Netboot-Installer VM appliance, filled in by build.sh -->
+<!-- EVE Netboot Installer VM appliance, filled in by build.sh -->
 <Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1"
           xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1"
           xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData"
@@ -21,15 +21,15 @@
     </Network>
   </NetworkSection>
   <VirtualSystem ovf:id="@@NAME@@">
-    <Info>EVE-Netboot-Installer VM appliance</Info>
+    <Info>EVE Netboot Installer VM appliance</Info>
     <Name>eve-netboot</Name>
     <AnnotationSection>
       <Info>Description</Info>
-      <Annotation>EVE-Netboot-Installer @@VERSION@@: PXE boot server for LF Edge EVE-OS installers. Open the VM console after power on to set it up. https://github.com/michiel-zededa/eve-netboot-installer</Annotation>
+      <Annotation>EVE Netboot Installer @@VERSION@@: PXE boot server for LF Edge EVE-OS installers. Open the VM console after power on to set it up. https://github.com/michiel-zededa/eve-netboot-installer</Annotation>
     </AnnotationSection>
     <ProductSection>
       <Info>Product</Info>
-      <Product>EVE-Netboot-Installer</Product>
+      <Product>EVE Netboot Installer</Product>
       <Version>@@VERSION@@</Version>
       <ProductUrl>https://github.com/michiel-zededa/eve-netboot-installer</ProductUrl>
     </ProductSection>

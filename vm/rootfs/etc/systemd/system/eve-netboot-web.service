@@ -1,5 +1,5 @@
 [Unit]
-Description=EVE-Netboot-Installer appliance: web management (HTTPS)
+Description=EVE Netboot Installer appliance: web management (HTTPS)
 After=eve-netboot-setup.service network-online.target
 Wants=network-online.target
 

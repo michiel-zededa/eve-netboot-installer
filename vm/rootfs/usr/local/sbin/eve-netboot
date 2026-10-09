@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-eve-netboot -- the EVE-Netboot-Installer VM appliance
+eve-netboot -- the EVE Netboot Installer VM appliance
 =====================================================
 
 One command for everything the appliance does:
@@ -17,7 +17,7 @@ One command for everything the appliance does:
   eve-netboot logs [svc]     follow the logs of the stack
   eve-netboot sync           check GitHub for new EVE-OS releases now
   eve-netboot update-system  Debian updates (apt), with a check afterwards
-  eve-netboot update-app     newest EVE-Netboot-Installer release, with rollback
+  eve-netboot update-app     newest EVE Netboot Installer release, with rollback
   eve-netboot export         print the settings as KEY=VALUE text
   eve-netboot web            the HTTPS management UI (eve-netboot-web.service)
 
@@ -39,6 +39,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -66,10 +67,11 @@ NET_DHCP = os.path.join(NETWORKD, "20-eve-netboot.network")
 SSHD_CONF = "/etc/ssh/sshd_config.d/10-eve-netboot.conf"
 SMB_CONF = "/etc/samba/smb.conf"
 ADMIN = "admin"
+PRODUCT = "EVE Netboot Installer"
 REPO = "michiel-zededa/eve-netboot-installer"
 IMAGE_REPO = f"ghcr.io/{REPO}"
-LANGUAGES = [("en", "English"), ("de", "Deutsch"), ("fr", "Francais"), ("es", "Espanol"),
-             ("pt", "Portugues"), ("nl", "Nederlands"), ("da", "Dansk"), ("no", "Norsk")]
+LANGUAGES = [("en", "English"), ("de", "Deutsch"), ("fr", "Français"), ("es", "Español"),
+             ("pt", "Português"), ("nl", "Nederlands"), ("da", "Dansk"), ("no", "Norsk")]
 SERIALS = ["none", "ttyS0", "ttyS1", "ttyAMA0"]
 
 # settings that configure the VM itself; everything else goes to the stack's .env
@@ -99,6 +101,14 @@ DEFAULTS = {
     "EVE_FLAVOURS": "kvm",
     "EVE_LTS_LINES": "3",
     "ENI_IMPORT_LABEL": "import share",
+    # shown as the value when not set (the stack has the same defaults)
+    "ENI_SYNC_INTERVAL": "86400",
+    "ENI_MENU_MODE": "standalone",
+    "EVE_GITHUB_REPO": "lf-edge/eve",
+    "EVE_DEFAULT_REBOOT": "1",
+    "EVE_DEFAULT_SOFT_SERIAL": "1",
+    "EVE_DEFAULT_NUKE_ALL_DISKS": "0",
+    "EVE_DEFAULT_SERIAL": "none",
 }
 
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -117,6 +127,65 @@ def migrate(settings):
         if old in settings and new not in settings:
             out[new] = settings[old]
     return out
+
+
+# --------------------------------------------------------------------------
+# texts: the same translations as the boot menu and the web UI
+# (app/i18n/<lang>.json in the image; a copy on the VM, made at build time).
+# ENI_LANGUAGE is the language of the boot menu, the status page and of this
+# tool (console and web management); English is the fallback for every key.
+# --------------------------------------------------------------------------
+I18N_DIRS = [os.path.join(LIB, "i18n"),
+             os.path.join(os.path.dirname(os.path.realpath(__file__)), *[".."] * 5, "app", "i18n")]
+_texts = {}
+_language = None     # chosen in the setup before it is saved
+_local = threading.local()   # per web request: the language of the browser
+
+
+def texts(lang):
+    if lang not in _texts:
+        out = {}
+        for code in dict.fromkeys(("en", lang)):
+            for d in I18N_DIRS:
+                try:
+                    with open(os.path.join(d, f"{code}.json"), encoding="utf-8") as f:
+                        out.update({k: v for k, v in json.load(f).items() if v})
+                    break
+                except (OSError, ValueError):
+                    continue
+        _texts[lang] = out
+    return _texts[lang]
+
+
+def language():
+    if getattr(_local, "language", None):
+        return _local.language
+    if _language:
+        return _language
+    lang = get(load_settings(), "ENI_LANGUAGE")
+    return lang if lang in dict(LANGUAGES) else "en"
+
+
+def set_language(lang):
+    global _language
+    _language = lang
+
+
+def use_language(lang):
+    """The language of this thread only (a web request, a job); None = the saved one."""
+    _local.language = lang if lang in dict(LANGUAGES) else None
+
+
+def thread_language():
+    return getattr(_local, "language", None)
+
+
+def tr(key, /, **values):
+    """tr("adm_disk_free", free=3) -> the text in the current language."""
+    text = texts(language()).get(key) or texts("en").get(key) or key
+    for k, v in values.items():
+        text = text.replace("{" + k + "}", str(v))
+    return text
 
 
 # --------------------------------------------------------------------------
@@ -190,72 +259,82 @@ def get(settings, key):
     return v if v != "" else DEFAULTS.get(key, "")
 
 
-def validate(s):
-    """List of human-readable problems (empty = fine)."""
+def problems(s):
+    """[(setting, human-readable problem)] (empty = fine)."""
     errors = []
     mode = get(s, "NET_MODE")
     if mode not in ("dhcp", "static"):
-        errors.append("NET_MODE must be dhcp or static")
+        errors.append(("NET_MODE", tr("adm_err_net_mode")))
     if mode == "static":
         try:
             iface = ipaddress.ip_interface(get(s, "NET_ADDRESS"))
             if iface.version != 4 or iface.network.prefixlen == 32:
                 raise ValueError
         except ValueError:
-            errors.append("NET_ADDRESS must be an IPv4 address with prefix, e.g. 192.168.1.20/24")
+            errors.append(("NET_ADDRESS", tr("adm_err_net_address")))
             iface = None
         gw = get(s, "NET_GATEWAY")
         if gw:
             try:
                 g = ipaddress.ip_address(gw)
                 if iface and g not in iface.network:
-                    errors.append(f"NET_GATEWAY {gw} is not in {iface.network}")
+                    errors.append(("NET_GATEWAY", tr("adm_err_gateway_net", gateway=gw, network=iface.network)))
             except ValueError:
-                errors.append("NET_GATEWAY must be an IPv4 address")
+                errors.append(("NET_GATEWAY", tr("adm_err_gateway")))
         for d in get(s, "NET_DNS").replace(",", " ").split():
             try:
                 ipaddress.ip_address(d)
             except ValueError:
-                errors.append(f"NET_DNS: {d} is not an IP address")
+                errors.append(("NET_DNS", tr("adm_err_dns", value=d)))
     sip = get(s, "SERVER_IP")
     if sip != "auto":
         try:
             ipaddress.IPv4Address(sip)
         except ValueError:
-            errors.append("SERVER_IP must be auto or an IPv4 address")
+            errors.append(("SERVER_IP", tr("adm_err_server_ip")))
     port = get(s, "HTTP_PORT")
     if not port.isdigit() or not 1 <= int(port) <= 65535 or int(port) == 69:
-        errors.append("HTTP_PORT must be a TCP port number")
+        errors.append(("HTTP_PORT", tr("adm_err_http_port")))
     if not re.fullmatch(r"[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", get(s, "HOSTNAME")):
-        errors.append("HOSTNAME may only contain letters, digits and '-'")
+        errors.append(("HOSTNAME", tr("adm_err_hostname")))
     wport = get(s, "WEB_ADMIN_PORT")
     if not wport.isdigit() or not 1 <= int(wport) <= 65535 or wport in (port, "69"):
-        errors.append("WEB_ADMIN_PORT must be a TCP port number other than HTTP_PORT")
+        errors.append(("WEB_ADMIN_PORT", tr("adm_err_web_port")))
     for k in ("SSH_PASSWORD_LOGIN", "SMB_IMPORT_SHARE", "WEB_ADMIN"):
         if get(s, k) not in ("yes", "no"):
-            errors.append(f"{k} must be yes or no")
+            errors.append((k, tr("adm_err_yes_no", key=k)))
     if get(s, "ENI_LANGUAGE") not in dict(LANGUAGES):
-        errors.append("ENI_LANGUAGE must be one of " + " ".join(dict(LANGUAGES)))
+        errors.append(("ENI_LANGUAGE", tr("adm_err_language", values=" ".join(dict(LANGUAGES)))))
     if not set(get(s, "EVE_ARCHES").split()) <= {"amd64", "arm64"} or not get(s, "EVE_ARCHES").split():
-        errors.append("EVE_ARCHES must be amd64, arm64 or both")
+        errors.append(("EVE_ARCHES", tr("adm_err_arches")))
     if not set(get(s, "EVE_FLAVOURS").split()) <= {"kvm", "k"} or not get(s, "EVE_FLAVOURS").split():
-        errors.append("EVE_FLAVOURS must be kvm, k or both")
-    if not get(s, "EVE_LTS_LINES").isdigit():
-        errors.append("EVE_LTS_LINES must be a number")
+        errors.append(("EVE_FLAVOURS", tr("adm_err_flavours")))
+    if not get(s, "EVE_LTS_LINES").isdigit() or not 1 <= int(get(s, "EVE_LTS_LINES")) <= 10:
+        errors.append(("EVE_LTS_LINES", tr("adm_err_lts_lines")))
+    timeout = s.get("ENI_MENU_TIMEOUT", "")
+    if timeout and not timeout.isdigit():
+        errors.append(("ENI_MENU_TIMEOUT", tr("adm_err_timeout")))
+    if os.path.isdir("/usr/share/zoneinfo") and not os.path.isfile(os.path.join("/usr/share/zoneinfo", get(s, "TZ"))):
+        errors.append(("TZ", tr("adm_err_tz")))
     serial = s.get("EVE_DEFAULT_SERIAL", "")
     if serial and serial not in SERIALS:
-        errors.append("EVE_DEFAULT_SERIAL must be one of " + " ".join(SERIALS))
+        errors.append(("EVE_DEFAULT_SERIAL", tr("adm_err_serial", values=" ".join(SERIALS))))
     for k, v in s.items():
         if k not in VM_KEYS and "'" in v:
-            errors.append(f"{k}: the character ' is not allowed")
+            errors.append((k, tr("adm_err_quote", key=k)))
         if "\n" in v:
-            errors.append(f"{k}: must be a single line")
+            errors.append((k, tr("adm_err_one_line", key=k)))
     return errors
+
+
+def validate(s, keys=None):
+    """Human-readable problems (empty = fine), optionally only those of some settings."""
+    return [text for key, text in problems(s) if keys is None or key in keys]
 
 
 def render_settings(s):
     """settings dict -> settings.env text (consumed secrets are never written)."""
-    lines = ["# EVE-Netboot-Installer appliance settings",
+    lines = [f"# {PRODUCT} appliance settings",
              "# Change them with: eve-netboot menu   (or edit and run: eve-netboot apply)",
              "# All application settings: https://github.com/" + REPO + "/blob/main/.env.example",
              ""]
@@ -266,7 +345,7 @@ def render_settings(s):
 
 
 def render_export(s):
-    lines = ["# EVE-Netboot-Installer settings export, " + datetime.date.today().isoformat(),
+    lines = [f"# {PRODUCT} settings export, " + datetime.date.today().isoformat(),
              "# Use it as the cloud-init user-data of a new VM, or import it in the setup menu.",
              "# Passwords and tokens are not included."]
     for k in sorted(s):
@@ -327,7 +406,7 @@ def render_smb_conf():
    max log size = 1000
 
 [eve-import]
-   comment = EVE installer ISOs for EVE-Netboot-Installer
+   comment = EVE-OS installer ISOs for the EVE Netboot Installer
    path = {IMPORT}
    valid users = {ADMIN}
    read only = no
@@ -475,14 +554,14 @@ def admin_has_password():
     return len(p.stdout.split()) > 1 and p.stdout.split()[1] == "P"
 
 
-def compose(*args, check=True):
+def compose(*args, check=True, quiet=False):
     return run(["docker", "compose", "--project-directory", STACK, "-f", os.path.join(STACK, "compose.yaml"),
-                "--env-file", os.path.join(STACK, ".env"), "-p", "eve-netboot", *args], check=check)
+                "--env-file", os.path.join(STACK, ".env"), "-p", "eve-netboot", *args], check=check, quiet=quiet)
 
 
 def stack_state():
     """{service: state} of the compose stack."""
-    p = compose("ps", "-a", "--format", "json", check=False)
+    p = compose("ps", "-a", "--format", "json", check=False, quiet=True)
     states = {}
     for line in p.stdout.splitlines():
         try:
@@ -595,7 +674,7 @@ def apply_stack(s, wait=True):
     ip = primary_ip() if wait is False else wait_for_ip()
     server_ip = ip if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP")
     if not server_ip:
-        raise RuntimeError("no IPv4 address yet - check the network settings")
+        raise RuntimeError(tr("adm_err_no_ip"))
     for d in (os.path.join(DATA, "www"), os.path.join(DATA, "tftp"), IMPORT):
         os.makedirs(d, exist_ok=True)
     shutil.chown(IMPORT, ADMIN, ADMIN)
@@ -714,40 +793,64 @@ def boot():
         log("not set up yet - waiting for the setup on the console")
 
 
-def status_lines():
+def status_info():
+    """The appliance's state for the status screen, the menu and diagnostics."""
     s = load_settings()
     ip = primary_ip()
     env = parse_env(read(os.path.join(STACK, ".env")))
     sip = env.get("SERVER_IP") or ip or "?"
-    port = get(s, "HTTP_PORT")
-    mode = "static" if get(s, "NET_MODE") == "static" else "DHCP"
-    L = [f"EVE-Netboot-Installer appliance {version()}   ({read('/etc/hostname').strip()})", ""]
-    if not is_configured():
-        L += ["Not set up yet.", f"VM address      {ip or 'none yet'} ({mode})"]
-        return L
-    st = stack_state()
-    services = "  ".join(f"{x} {st.get(x, 'missing')}" for x in ("sync", "tftp", "web"))
-    status = json.loads(read(os.path.join(WWW, "eve", "status.json"), "{}") or "{}")
-    entries = status.get("entries", [])
-    ready = sum(1 for e in entries if e.get("netboot_ok") and not e.get("error"))
-    du = shutil.disk_usage("/")
-    L += [f"VM address      {ip or 'none'} ({mode})",
-          f"Status page     http://{sip}:{port}/",
-          f"DHCP settings   next-server {sip}",
-          "                boot file   eve-x86_64.efi  (x86_64 UEFI)",
-          "                            eve-arm64.efi   (arm64 UEFI)",
-          f"Services        {services}",
-          f"Installers      {ready} ready, last GitHub check {status.get('github_checked') or '-'}",
-          f"Disk            {(du.total - du.free) / 2**30:.1f} GB used, {du.free / 2**30:.1f} GB free"]
-    if get(s, "SMB_IMPORT_SHARE") == "yes":
-        L.append(f"Import share    \\\\{ip}\\eve-import  (user {ADMIN})")
-    L.append("Web management  " + (admin_url(s, sip) if get(s, "WEB_ADMIN") == "yes"
-                                  else "off (menu -> Advanced settings)"))
-    if os.path.exists("/run/reboot-required"):
-        L.append("Updates         installed - a reboot is needed")
-    err = read(os.path.join(STATE, "last-error")).strip()
-    if err:
-        L += ["", "Last error: " + err[:200]]
+    info = {
+        "version": version(), "hostname": read("/etc/hostname").strip(), "configured": is_configured(),
+        "ip": ip, "server_ip": sip, "net_mode": "static" if get(s, "NET_MODE") == "static" else "dhcp",
+        "status_url": f"http://{sip}:{get(s, 'HTTP_PORT')}/",
+        "web_admin": admin_url(s, sip) if get(s, "WEB_ADMIN") == "yes" else "",
+        "smb_share": f"\\\\{ip}\\eve-import" if get(s, "SMB_IMPORT_SHARE") == "yes" else "",
+        "reboot_required": os.path.exists("/run/reboot-required"),
+        "last_error": read(os.path.join(STATE, "last-error")).strip()[:200],
+    }
+    if info["configured"]:
+        info["services"] = stack_state()
+        status = json.loads(read(os.path.join(WWW, "eve", "status.json"), "{}") or "{}")
+        info["entries"] = status.get("entries", [])
+        info["ready"] = sum(1 for e in info["entries"] if e.get("netboot_ok") and not e.get("error"))
+        info["github_checked"] = status.get("github_checked") or ""
+        info["activity"] = json.loads(read(os.path.join(WWW, "eve", "activity.json"), "{}") or "{}")
+        du = shutil.disk_usage("/")
+        info["disk_used"], info["disk_free"] = (du.total - du.free) / 2**30, du.free / 2**30
+    return info
+
+
+def status_rows(info):
+    """[(label, value, tone)] of the main status; tone: ok, warn, err or ''."""
+    net = f"{info['ip'] or tr('adm_none_yet')} ({tr('adm_net_' + info['net_mode'])})"
+    if not info["configured"]:
+        return [(tr("adm_st_state"), tr("adm_st_not_set_up"), "warn"), (tr("adm_st_vm_address"), net, "")]
+    rows = [(tr("adm_st_vm_address"), net, ""),
+            (tr("adm_st_status_page"), info["status_url"], ""),
+            (tr("adm_st_web_admin"), info["web_admin"] or tr("adm_st_web_admin_off"), "" if info["web_admin"] else "warn")]
+    if info["smb_share"]:
+        rows.append((tr("adm_st_smb_share"), f"{info['smb_share']}  ({tr('adm_user')} {ADMIN})", ""))
+    return rows
+
+
+def status_lines():
+    """The status as plain text (eve-netboot status, diagnostics)."""
+    info = status_info()
+    L = [f"{PRODUCT} {info['version']}   ({info['hostname']})", ""]
+    L += [f"{label:<18} {value}" for label, value, _ in status_rows(info)]
+    if info["configured"]:
+        services = "  ".join(f"{x} {info['services'].get(x, 'missing')}" for x in ("sync", "tftp", "web"))
+        L += [f"{tr('adm_st_dhcp'):<18} next-server {info['server_ip']}",
+              f"{'':<18} {tr('adm_st_boot_file')} eve-x86_64.efi (x86_64 UEFI), eve-arm64.efi (arm64 UEFI)",
+              f"{tr('adm_st_services'):<18} {services}",
+              f"{tr('adm_st_installers'):<18} " + tr("adm_st_installers_value", n=info["ready"],
+                                                      date=info["github_checked"] or "-"),
+              f"{tr('adm_st_disk'):<18} " + tr("adm_st_disk_value", used=f"{info['disk_used']:.1f}",
+                                                free=f"{info['disk_free']:.1f}")]
+    if info["reboot_required"]:
+        L.append(f"{tr('adm_st_updates'):<18} {tr('adm_st_reboot_needed')}")
+    if info["last_error"]:
+        L += ["", tr("adm_st_last_error") + ": " + info["last_error"]]
     return L
 
 
@@ -763,11 +866,11 @@ def update_system(say=print):
     """apt update/upgrade/autoremove; never touches packages marked manual."""
     env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
     opts = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
-    say("Downloading package lists ...")
+    say(tr("adm_upd_lists"))
     run(["apt-get", "update"], env=env)
-    say("Installing updates ...")
+    say(tr("adm_upd_installing"))
     run(["apt-get", "-y", *opts, "full-upgrade"], env=env)
-    say("Removing packages that are no longer needed ...")
+    say(tr("adm_upd_autoremove"))
     run(["apt-get", "-y", "autoremove", "--purge"], env=env)
     run(["apt-get", "clean"], env=env)
     s = load_settings()
@@ -777,10 +880,9 @@ def update_system(say=print):
     else:
         ok = True
     reboot = os.path.exists("/run/reboot-required")
-    msg = "System updated. " + ("The appliance is working." if ok else
-                                "WARNING: the stack is not healthy - see 'eve-netboot logs'.")
+    msg = tr("adm_upd_done") + " " + tr("adm_upd_working" if ok else "adm_upd_unhealthy")
     if reboot:
-        msg += " A reboot is needed to finish (kernel or system library update)."
+        msg += " " + tr("adm_upd_reboot")
     log(msg)
     return ok, reboot, msg
 
@@ -803,17 +905,16 @@ def update_app(say=print):
     """Newest release: pull image + compose.yaml, check health, roll back on failure."""
     s = load_settings()
     if s.get("ENI_IMAGE"):
-        return False, f"ENI_IMAGE is set to {s['ENI_IMAGE']} in the settings; remove it to use app updates."
+        return False, tr("adm_app_pinned", image=s["ENI_IMAGE"])
     tag = latest_release()
     target = f"{IMAGE_REPO}:{tag.lstrip('v')}"
     old_image = current_image(s)
     current, newest = version_tuple(old_image), version_tuple(tag)
     if current is None:
-        return False, (f"This VM runs a development build ({old_image}); "
-                       "app updates are only offered for release builds.")
+        return False, tr("adm_app_dev", image=old_image)
     if newest is None or newest <= current:
-        return True, f"Already on the newest version ({old_image.rsplit(':', 1)[-1]})."
-    say(f"Downloading {target} ...")
+        return True, tr("adm_app_current", version=old_image.rsplit(":", 1)[-1])
+    say(tr("adm_app_downloading", image=target))
     run(["docker", "pull", target])
     compose_url = f"https://raw.githubusercontent.com/{REPO}/{tag}/compose.yaml"
     with urllib.request.urlopen(compose_url, timeout=30) as r:
@@ -821,7 +922,7 @@ def update_app(say=print):
     old_compose = read(os.path.join(STACK, "compose.yaml"))
     write(os.path.join(STACK, "compose.yaml"), new_compose)
     write(os.path.join(STATE, "image"), target + "\n")
-    say("Restarting with the new version ...")
+    say(tr("adm_app_restarting"))
     try:
         apply_stack(s)
         ok = healthy(s)
@@ -830,13 +931,13 @@ def update_app(say=print):
         ok = False
     if ok:
         log(f"app updated: {old_image} -> {target}")
-        return True, f"Updated to {tag}. The previous version stays available for a rollback."
-    say("The new version did not start correctly - rolling back ...")
+        return True, tr("adm_app_updated", version=tag)
+    say(tr("adm_app_rolling_back"))
     write(os.path.join(STACK, "compose.yaml"), old_compose)
     write(os.path.join(STATE, "image"), old_image + "\n")
     apply_stack(s)
     log(f"app update to {target} rolled back to {old_image}")
-    return False, f"Update to {tag} failed and was rolled back to {old_image}."
+    return False, tr("adm_app_rolled_back", version=tag, image=old_image)
 
 
 def publish_export(s, minutes=15):
@@ -856,14 +957,32 @@ def fetch_import(url):
         text = r.read(65536).decode("utf-8", "replace")
     found = parse_env(text)
     if not found:
-        raise ValueError("no settings found at that address")
+        raise ValueError(tr("adm_imp_none"))
     return found
 
 
 # --------------------------------------------------------------------------
 # whiptail UI
 # --------------------------------------------------------------------------
-BACKTITLE = "EVE-Netboot-Installer appliance"
+# The look of EVE-OS's own console (the EVE monitor): black, light grey text and
+# lines, the selection inverted. Texts in ENI_LANGUAGE (see tr()).
+NEWT_COLORS = " ".join([
+    "root=lightgray,black", "roottext=lightgray,black", "border=lightgray,black", "window=lightgray,black",
+    "shadow=black,black", "title=white,black", "button=lightgray,black", "actbutton=black,lightgray",
+    "compactbutton=lightgray,black", "checkbox=lightgray,black", "actcheckbox=black,lightgray",
+    "entry=black,lightgray", "disentry=gray,black", "label=lightgray,black", "listbox=lightgray,black",
+    "actlistbox=black,lightgray", "sellistbox=lightgray,black", "actsellistbox=black,lightgray",
+    "textbox=lightgray,black", "acttextbox=black,lightgray", "helpline=black,lightgray",
+    "emptyscale=,black", "fullscale=,lightgray"])
+
+
+# functional colour per dialog, as in the EVE monitor: red for errors and for
+# questions that stop the server, orange for warnings, green for success
+DIALOG_TONES = {
+    "err": "border=red,black title=brightred,black actbutton=black,red",
+    "warn": "border=brown,black title=yellow,black",
+    "ok": "border=green,black title=brightgreen,black actbutton=black,green",
+}
 
 
 class Cancel(Exception):
@@ -875,40 +994,61 @@ def rows(text, width=72):
     return sum(max(1, -(-len(line) // (width - 6))) for line in text.split("\n"))
 
 
-def wt(kind, title, text, *args, height=0, width=72, extra=()):
-    cmd = ["whiptail", "--backtitle", BACKTITLE, "--title", title, *extra, kind, text,
+_abort_if = None    # the setup wizard: stop asking once the VM was set up elsewhere
+
+
+def wt(kind, title, text, *args, height=0, width=72, extra=(), tone=None):
+    # UTF-8 for the translations; the console's own locale may be plain C
+    colors = NEWT_COLORS + (" " + DIALOG_TONES[tone] if tone else "")
+    env = dict(os.environ, NEWT_COLORS=colors, LC_ALL="C.UTF-8")
+    cmd = ["whiptail", "--backtitle", f"{PRODUCT} {version()}", "--title", f" {title} ", *extra, kind, text,
            str(height), str(width), *args]
-    p = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
-    return p.returncode, p.stderr.strip()
+    p = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, env=env)
+    while True:
+        try:
+            _, err = p.communicate(timeout=2)
+            return p.returncode, err.strip()
+        except subprocess.TimeoutExpired:
+            if _abort_if and _abort_if():
+                # set up in the browser or through cloud-init meanwhile
+                p.terminate()
+                p.communicate()
+                subprocess.run(["stty", "sane"], check=False)
+                return 255, ""
 
 
-def msg(title, text, height=0):
-    wt("--msgbox", title, text, height=height)
+def msg(title, text, tone=None):
+    # an explicit height: with 0, whiptail also ignores the width and does not wrap
+    wt("--msgbox", title, text, height=min(rows(text) + 7, 22), extra=["--ok-button", tr("adm_btn_ok")], tone=tone,
+       width=72)
 
 
-def info(title, text):
-    wt("--infobox", title, text, height=8)
+def info(title, text, tone="warn"):
+    wt("--infobox", title, text, height=rows(text) + 4, tone=tone)
 
 
-def yesno(title, text, yes="Yes", no="No", default_no=False):
-    extra = ["--yes-button", yes, "--no-button", no] + (["--defaultno"] if default_no else [])
-    return wt("--yesno", title, text, extra=extra)[0] == 0
+def yesno(title, text, yes=None, no=None, default_no=False, tone=None):
+    extra = ["--yes-button", yes or tr("adm_btn_yes"), "--no-button", no or tr("adm_btn_no")]
+    return wt("--yesno", title, text, height=min(rows(text) + 7, 22), tone=tone,
+              extra=extra + (["--defaultno"] if default_no else []))[0] == 0
 
 
-def ask(title, text, default="", password=False, cancel="Back"):
+def ask(title, text, default="", password=False, cancel=None):
     kind = "--passwordbox" if password else "--inputbox"
     rc, out = wt(kind, title, text, *([] if password else [default]), height=rows(text) + 8,
-                 extra=["--cancel-button", cancel])
+                 extra=["--ok-button", tr("adm_btn_ok"), "--cancel-button", cancel or tr("adm_btn_back")])
     if rc != 0:
         raise Cancel
     return out.strip()
 
 
-def choose(title, text, items, default=None, cancel="Back", ok="Select"):
+def choose(title, text, items, default=None, cancel=None, ok=None):
+    """cancel=False: no cancel button."""
     args = []
     for tag, label in items:
         args += [tag, label]
-    extra = ["--cancel-button", cancel, "--ok-button", ok, "--notags"]
+    extra = (["--nocancel"] if cancel is False else ["--cancel-button", cancel or tr("adm_btn_back")])
+    extra += ["--ok-button", ok or tr("adm_btn_select"), "--notags"]
     if default:
         extra += ["--default-item", default]
     rc, out = wt("--menu", title, text, str(min(len(items), 14)), *args,
@@ -923,7 +1063,8 @@ def checklist(title, text, items, selected):
     for tag, label in items:
         args += [tag, label, "ON" if tag in selected else "OFF"]
     rc, out = wt("--checklist", title, text, str(len(items)), *args, height=len(items) + rows(text) + 7,
-                 extra=["--cancel-button", "Back", "--separate-output", "--notags"])
+                 extra=["--ok-button", tr("adm_btn_ok"), "--cancel-button", tr("adm_btn_back"),
+                        "--separate-output", "--notags"])
     if rc != 0:
         raise Cancel
     return out.split()
@@ -931,121 +1072,266 @@ def checklist(title, text, items, selected):
 
 def ask_password(title, what="admin", minimum=8):
     while True:
-        p1 = ask(title, f"New {what} password (at least {minimum} characters):", password=True)
+        p1 = ask(title, tr("adm_pw_new_share" if what == "share" else "adm_pw_new_admin", n=minimum), password=True)
         if len(p1) < minimum:
-            msg(title, f"The password must have at least {minimum} characters.")
+            msg(title, tr("adm_pw_too_short", n=minimum), tone="err")
             continue
-        p2 = ask(title, "Type the password again:", password=True)
+        p2 = ask(title, tr("adm_pw_again"), password=True)
         if p1 != p2:
-            msg(title, "The passwords do not match. Please try again.")
+            msg(title, tr("adm_pw_mismatch"), tone="err")
             continue
         return p1
 
 
-# ---- one screen per group of settings; each takes and returns a settings dict
-def screen_network(s):
+# ---- the settings, grouped as on the web pages (ui/src/sections.ts); labels,
+# help texts and option names are shared with the web UI (adm_f_*, adm_h_*, adm_o_*)
+def adapters():
+    return sorted(n for n in os.listdir("/sys/class/net") if re.match(r"^(en|eth)", n))
+
+
+FIELDS = {
+    "NET_MODE": ("choice", ["dhcp", "static"]),
+    "NET_ADDRESS": ("text", None), "NET_GATEWAY": ("text", None), "NET_DNS": ("text", None),
+    "NET_INTERFACE": ("adapter", None), "HOSTNAME": ("text", None),
+    "SERVER_IP": ("text", None), "HTTP_PORT": ("text", None),
+    "EVE_ARCHES": ("checks", ["amd64", "arm64"]), "EVE_FLAVOURS": ("checks", ["kvm", "k"]),
+    "EVE_LTS_LINES": ("text", None), "ENI_SYNC_INTERVAL": ("choice", ["86400", "43200", "604800", "0"]),
+    "EVE_GITHUB_REPO": ("text", None), "ENI_GITHUB_TOKEN": ("secret", None),
+    "ENI_LANGUAGE": ("language", None), "ENI_MENU_MODE": ("choice", ["standalone", "chained"]),
+    "ENI_MENU_TIMEOUT": ("text", None), "ENI_IMPORT_LABEL": ("text", None),
+    "IPXE_ALIASES_X86_64": ("text", None), "IPXE_ALIASES_ARM64": ("text", None),
+    "EVE_DEFAULT_INSTALL_SERVER": ("text", None), "EVE_DEFAULT_SERIAL": ("choice", SERIALS),
+    "EVE_DEFAULT_INSTALL_DISK": ("text", None), "EVE_DEFAULT_PERSIST_DISK": ("text", None),
+    "EVE_DEFAULT_REBOOT": ("onezero", None), "EVE_DEFAULT_SOFT_SERIAL": ("onezero", None),
+    "EVE_DEFAULT_NUKE_ALL_DISKS": ("onezero", None), "EVE_DEFAULT_EXTRA_ARGS": ("text", None),
+    "SMB_IMPORT_SHARE": ("yesno", None), "SMB_PASSWORD": ("smbpassword", None),
+    "WEB_ADMIN": ("yesno", None), "WEB_ADMIN_PORT": ("text", None), "SSH_PASSWORD_LOGIN": ("yesno", None),
+    "ADMIN_SSH_KEYS": ("keys", None), "TZ": ("text", None),
+}
+SECTIONS = {
+    "network": ["NET_MODE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "NET_INTERFACE", "HOSTNAME"],
+    "server": ["SERVER_IP", "HTTP_PORT"],
+    "mirror": ["EVE_ARCHES", "EVE_FLAVOURS", "EVE_LTS_LINES", "ENI_SYNC_INTERVAL", "EVE_GITHUB_REPO",
+               "ENI_GITHUB_TOKEN"],
+    "bootmenu": ["ENI_LANGUAGE", "ENI_MENU_MODE", "ENI_MENU_TIMEOUT", "ENI_IMPORT_LABEL",
+                 "IPXE_ALIASES_X86_64", "IPXE_ALIASES_ARM64"],
+    "defaults": ["EVE_DEFAULT_INSTALL_SERVER", "EVE_DEFAULT_SERIAL", "EVE_DEFAULT_INSTALL_DISK",
+                 "EVE_DEFAULT_PERSIST_DISK", "EVE_DEFAULT_REBOOT", "EVE_DEFAULT_SOFT_SERIAL",
+                 "EVE_DEFAULT_NUKE_ALL_DISKS", "EVE_DEFAULT_EXTRA_ARGS"],
+    "share": ["SMB_IMPORT_SHARE", "SMB_PASSWORD"],
+    "access": ["WEB_ADMIN", "WEB_ADMIN_PORT", "SSH_PASSWORD_LOGIN", "ADMIN_SSH_KEYS", "TZ"],
+}
+SHOWN_IF = {
+    "NET_ADDRESS": lambda s: get(s, "NET_MODE") == "static",
+    "NET_GATEWAY": lambda s: get(s, "NET_MODE") == "static",
+    "NET_DNS": lambda s: get(s, "NET_MODE") == "static",
+    "NET_INTERFACE": lambda s: get(s, "NET_MODE") == "static",
+    "SMB_PASSWORD": lambda s: get(s, "SMB_IMPORT_SHARE") == "yes",
+}
+
+
+def has_text(key):
+    return key in texts("en")
+
+
+def label(key):
+    return tr("adm_f_" + key.lower())
+
+
+def help_text(key, s=None):
+    k = "adm_h_" + key.lower()
+    if not has_text(k):
+        return ""
+    ip = primary_ip() or "VM"
+    return tr(k, ip=ip, url=f"https://{ip}:{get(s or load_settings(), 'WEB_ADMIN_PORT')}/")
+
+
+def option(key, value):
+    k = f"adm_o_{key.lower()}_{value.lower()}"
+    return tr(k) if has_text(k) else value
+
+
+def shown_value(s, key):
+    kind, opts = FIELDS[key]
+    v = s.get(key) or get(s, key)
+    if kind == "yesno":
+        return tr("adm_on") if v == "yes" else tr("adm_off")
+    if kind == "onezero":
+        return tr("adm_on") if v == "1" else tr("adm_off")
+    if kind == "secret":
+        return tr("adm_set") if s.get(key) else tr("adm_not_set")
+    if kind == "smbpassword":
+        return tr("adm_set") if smb_has_password() else tr("adm_not_set")
+    if kind == "keys":
+        return str(len([k for k in v.split(";") if k.strip()]))
+    if kind == "language":
+        return dict(LANGUAGES).get(v, v)
+    if kind == "checks":
+        return ", ".join(option(key, x) for x in v.split()) or "-"
+    if kind == "choice":
+        return option(key, v) if v else "-"
+    if not v:
+        return tr("adm_p_" + key.lower()) if has_text("adm_p_" + key.lower()) else "-"
+    return v
+
+
+def edit_field(title, key, s):
+    """Ask for one setting; changes s. Raises Cancel."""
+    kind, opts = FIELDS[key]
+    text = label(key) + (("\n\n" + help_text(key, s)) if help_text(key, s) else "")
+    current = s.get(key) or get(s, key)
+    if kind in ("yesno", "onezero"):
+        on, off = ("yes", "no") if kind == "yesno" else ("1", "0")
+        s[key] = on if yesno(title, text, tr("adm_on"), tr("adm_off"), default_no=current != on) else off
+    elif kind == "choice":
+        s[key] = choose(title, text, [(o, option(key, o)) for o in opts], default=current or None)
+    elif kind == "language":
+        s[key] = choose(title, text, LANGUAGES, default=current or "en")
+    elif kind == "adapter":
+        addrs = dict(ipv4_addresses())
+        items = [("", tr("adm_o_net_interface_first"))] + [
+            (n, f"{n} ({tr('adm_now')} {addrs[n]})" if n in addrs else n) for n in adapters()]
+        s[key] = choose(title, text, items, default=current or "")
+    elif kind == "checks":
+        while True:
+            chosen = checklist(title, text + "\n" + tr("adm_space_selects"), [(o, option(key, o)) for o in opts],
+                               current.split())
+            if chosen:
+                break
+            msg(title, tr("adm_select_one"), tone="err")
+        s[key] = " ".join(chosen)
+    elif kind == "secret":
+        value = ask(title, text + "\n" + tr("adm_secret_empty_keeps"), password=True, cancel=tr("adm_btn_cancel"))
+        if value == "-":
+            s.pop(key, None)
+        elif value:
+            s[key] = value
+    elif kind == "smbpassword":
+        s[key] = ask_password(title, "share")
+    elif kind == "keys":
+        s[key] = ask(title, text, current, cancel=tr("adm_btn_cancel"))
+    else:
+        s[key] = ask(title, text, current, cancel=tr("adm_btn_cancel"))
+
+
+def screen_section(section, s):
+    """A list of the section's settings with their values; Enter changes one."""
     s = dict(s)
-    current = ", ".join(f"{a} on {i}" for i, a in ipv4_addresses()) or "no address yet"
-    mode = choose("Network", f"How does this VM get its IP address?\n\nNow: {current}",
-                  [("dhcp", "Automatically (DHCP) - recommended with a DHCP reservation"),
-                   ("static", "Fixed address (static)")], default=get(s, "NET_MODE"))
+    title = tr("adm_sec_" + section)
+    while True:
+        keys = [k for k in SECTIONS[section] if k not in SHOWN_IF or SHOWN_IF[k](s)]
+        width = min(max(len(label(k)) for k in keys), 34)
+        items = [(k, f"{cut(label(k), width):<{width}}  {cut(shown_value(s, k), 60 - width)}") for k in keys]
+        try:
+            c = choose(title, tr("adm_sec_" + section + "_text") + "\n\n" + tr("adm_section_hint"), items,
+                       cancel=tr("adm_btn_done"), ok=tr("adm_btn_change"))
+        except Cancel:
+            return s
+        before = set(validate(s))
+        old = dict(s)
+        try:
+            if c == "NET_MODE":
+                s = screen_network(s, hostname=False)
+                continue
+            edit_field(title, c, s)
+        except Cancel:
+            s = old
+            continue
+        errors = [e for e in validate(s) if e not in before]
+        if errors:
+            msg(title, "\n".join(errors), tone="err")
+            s = old
+
+
+# ---- step by step, for the setup wizard (and the network, which belongs together)
+def screen_network(s, hostname=True):
+    s = dict(s)
+    title = tr("adm_sec_network")
+    current = ", ".join(tr("adm_addr_on", address=a, interface=i) for i, a in ipv4_addresses()) or tr("adm_none_yet")
+    mode = choose(title, tr("adm_net_question", now=current),
+                  [("dhcp", option("NET_MODE", "dhcp")), ("static", option("NET_MODE", "static"))],
+                  default=get(s, "NET_MODE"))
     s["NET_MODE"] = mode
     if mode == "dhcp":
         for k in ("NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "NET_INTERFACE"):
             s.pop(k, None)
-        return s
-    s["NET_INTERFACE"] = s.get("NET_INTERFACE") or primary_interface() or ""
-    while True:
-        s["NET_ADDRESS"] = ask("Network", "IP address with prefix length\n(for example 192.168.1.20/24):",
+    while mode == "static":
+        if len(adapters()) > 1:
+            edit_field(title, "NET_INTERFACE", s)
+        s["NET_ADDRESS"] = ask(title, tr("adm_net_ask_address"),
                                s.get("NET_ADDRESS") or (ipv4_addresses()[0][1] if ipv4_addresses() else ""))
-        s["NET_GATEWAY"] = ask("Network", "Default gateway (router), or empty for none:",
-                               s.get("NET_GATEWAY", ""))
-        s["NET_DNS"] = ask("Network", "DNS server(s), separated by spaces\n(for example 192.168.1.1 1.1.1.1):",
-                           s.get("NET_DNS", ""))
-        errors = [e for e in validate(s) if e.startswith("NET_")]
+        s["NET_GATEWAY"] = ask(title, tr("adm_net_ask_gateway"), s.get("NET_GATEWAY", ""))
+        s["NET_DNS"] = ask(title, tr("adm_net_ask_dns"), s.get("NET_DNS", ""))
+        errors = validate(s, ("NET_MODE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS"))
         if not errors:
-            return s
-        msg("Network", "\n".join(errors))
+            break
+        msg(title, "\n".join(errors), tone="err")
+    while hostname:
+        s["HOSTNAME"] = ask(title, label("HOSTNAME") + ":", get(s, "HOSTNAME"))
+        errors = validate(s, ("HOSTNAME",))
+        if not errors:
+            break
+        msg(title, "\n".join(errors), tone="err")
+    return s
 
 
 def screen_server_ip(s):
     s = dict(s)
+    title = tr("adm_sec_server")
     ip = primary_ip() or "?"
-    c = choose("Server address",
-               "Which address do the PXE clients use to reach this VM?\n"
-               "It goes into the DHCP settings and the boot menu.",
-               [("auto", f"This VM's own address (now {ip}) - recommended"),
-                ("manual", "Another address (NAT, port forwarding, several networks)")],
+    c = choose(title, tr("adm_server_question"),
+               [("auto", tr("adm_server_opt_auto", ip=ip)), ("manual", tr("adm_server_opt_manual"))],
                default="auto" if get(s, "SERVER_IP") == "auto" else "manual")
     if c == "auto":
         s["SERVER_IP"] = "auto"
         return s
     while True:
-        s["SERVER_IP"] = ask("Server address", "IPv4 address the PXE clients use:",
-                             "" if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP"))
-        if not [e for e in validate(s) if e.startswith("SERVER_IP")]:
+        s["SERVER_IP"] = ask(title, tr("adm_server_ask"), "" if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP"))
+        errors = validate(s, ("SERVER_IP",))
+        if not errors:
             return s
-        msg("Server address", "That is not an IPv4 address.")
+        msg(title, "\n".join(errors), tone="err")
 
 
-def screen_language(s):
+def screen_language(s, first=False):
     s = dict(s)
-    s["ENI_LANGUAGE"] = choose("Language", "Language of the boot menu and the status page:",
-                               LANGUAGES, default=get(s, "ENI_LANGUAGE"))
+    title = "Language / Sprache / Langue / Idioma / Taal / Sprog" if first else tr("adm_sec_language")
+    s["ENI_LANGUAGE"] = choose(title, tr("adm_language_text"), LANGUAGES, default=get(s, "ENI_LANGUAGE"),
+                               cancel=False if first else None)
+    set_language(s["ENI_LANGUAGE"])
     return s
 
 
 def screen_mirror(s):
     s = dict(s)
+    title = tr("adm_sec_mirror")
+    for key in ("EVE_ARCHES", "EVE_FLAVOURS"):
+        edit_field(title, key, s)
     while True:
-        arches = checklist("Mirror", "Which architectures do your machines have?\n(Space selects, Enter continues)",
-                           [("amd64", "x86_64 (Intel/AMD)"), ("arm64", "ARM 64-bit")], get(s, "EVE_ARCHES").split())
-        if arches:
-            break
-        msg("Mirror", "Select at least one architecture.")
-    s["EVE_ARCHES"] = " ".join(arches)
-    while True:
-        flav = checklist("Mirror", "Which EVE-OS variants?",
-                         [("kvm", "kvm - the standard variant"),
-                          ("k", "k - with Kubernetes, needs >= 8 GB RAM on the target")],
-                         get(s, "EVE_FLAVOURS").split())
-        if flav:
-            break
-        msg("Mirror", "Select at least one variant.")
-    s["EVE_FLAVOURS"] = " ".join(flav)
-    while True:
-        n = ask("Mirror", "How many EVE-OS LTS release lines should be mirrored?\n"
-                "(each line is about 0.5 GB per architecture and variant)", get(s, "EVE_LTS_LINES"))
-        if n.isdigit() and 1 <= int(n) <= 10:
-            s["EVE_LTS_LINES"] = n
+        s["EVE_LTS_LINES"] = ask(title, label("EVE_LTS_LINES") + "\n\n" + help_text("EVE_LTS_LINES"),
+                                 get(s, "EVE_LTS_LINES"))
+        errors = validate(s, ("EVE_LTS_LINES",))
+        if not errors:
             return s
-        msg("Mirror", "Enter a number from 1 to 10.")
+        msg(title, "\n".join(errors), tone="err")
 
 
 def screen_defaults(s):
     s = dict(s)
-    s["EVE_DEFAULT_INSTALL_SERVER"] = ask(
-        "Installer defaults", "Controller that installed nodes connect to\n"
-        "(for example zedcloud.zededa.net), or empty to use what is in the ISO:",
-        s.get("EVE_DEFAULT_INSTALL_SERVER", ""))
-    s["EVE_DEFAULT_SERIAL"] = choose(
-        "Installer defaults", "Serial console of the machines you install:",
-        [("none", "none (screen only)"), ("ttyS0", "ttyS0"), ("ttyS1", "ttyS1"), ("ttyAMA0", "ttyAMA0 (ARM)")],
-        default=s.get("EVE_DEFAULT_SERIAL") or "none")
+    title = tr("adm_sec_defaults")
+    for key in ("EVE_DEFAULT_INSTALL_SERVER", "EVE_DEFAULT_SERIAL"):
+        edit_field(title, key, s)
     return s
 
 
 def screen_smb(s):
     s = dict(s)
-    on = yesno("Import share",
-               "Share the folder for your own installer ISOs on the network (SMB),\n"
-               "so you can copy ISOs to it from Windows or macOS?\n\n"
-               f"Share: \\\\{primary_ip() or 'VM-address'}\\eve-import   user: {ADMIN}",
-               yes="Share it", no="No share", default_no=get(s, "SMB_IMPORT_SHARE") != "yes")
+    title = tr("adm_sec_share")
+    on = yesno(title, tr("adm_share_question", share=f"\\\\{primary_ip() or 'VM'}\\eve-import", user=ADMIN),
+               yes=tr("adm_share_yes"), no=tr("adm_share_no"), default_no=get(s, "SMB_IMPORT_SHARE") != "yes")
     s["SMB_IMPORT_SHARE"] = "yes" if on else "no"
-    if on and (not smb_has_password() or yesno("Import share", "Set a new password for the share?",
-                                                default_no=True)):
-        s["SMB_PASSWORD"] = ask_password("Import share", "share")
+    if on and (not smb_has_password() or yesno(title, tr("adm_share_new_password"), default_no=True)):
+        s["SMB_PASSWORD"] = ask_password(title, "share")
     return s
 
 
@@ -1054,133 +1340,110 @@ def smb_has_password():
     return any(line.startswith(ADMIN + ":") for line in p.stdout.splitlines())
 
 
-def screen_advanced(s):
-    s = dict(s)
-    while True:
-        try:
-            c = choose("Advanced", "Change a setting (Back when done, then the changes are applied):", [
-            ("HTTP_PORT", f"HTTP port of the status page and menu   [{get(s, 'HTTP_PORT')}]"),
-            ("ENI_MENU_TIMEOUT", f"Boot menu timeout in seconds           [{s.get('ENI_MENU_TIMEOUT') or '300'}]"),
-            ("HOSTNAME", f"Host name of this VM                   [{get(s, 'HOSTNAME')}]"),
-            ("TZ", f"Time zone                              [{get(s, 'TZ')}]"),
-            ("SSH_PASSWORD_LOGIN", f"SSH login with password                [{get(s, 'SSH_PASSWORD_LOGIN')}]"),
-            ("ADMIN_SSH_KEYS", f"SSH public keys for {ADMIN}              [{len(get(s, 'ADMIN_SSH_KEYS').split(';')) if get(s, 'ADMIN_SSH_KEYS') else 0}]"),
-            ("ENI_GITHUB_TOKEN", f"GitHub token (only for API limits)     [{'set' if s.get('ENI_GITHUB_TOKEN') else 'none'}]"),
-            ("WEB_ADMIN", f"Web management (https, port {get(s, 'WEB_ADMIN_PORT')})   [{'on' if get(s, 'WEB_ADMIN') == 'yes' else 'off'}]"),
-            ("edit", "Edit the settings file (all settings, for experts)"),
-            ], cancel="Back")
-        except Cancel:
-            return s
-        if c == "edit":
-            save_settings(s)
-            subprocess.run(["nano", SETTINGS])
-            s = load_settings()
-            continue
-        if c == "WEB_ADMIN":
-            s[c] = "yes" if yesno("Advanced", "Allow managing this VM in a web browser?\n\n"
-                                  f"https://{primary_ip() or 'VM-address'}:{get(s, 'WEB_ADMIN_PORT')}/  "
-                                  "(login: admin password; the browser warns once\n"
-                                  "about the self-signed certificate)",
-                                  default_no=get(s, c) == "no") else "no"
-            continue
-        if c == "SSH_PASSWORD_LOGIN":
-            s[c] = "yes" if yesno("Advanced", "Allow SSH login with the admin password?\n"
-                                  "(Login with an SSH key always works.)",
-                                  default_no=get(s, c) == "no") else "no"
-            continue
-        if c == "ADMIN_SSH_KEYS":
-            s[c] = ask("Advanced", "SSH public key(s), several separated by ';':", get(s, c), cancel="Cancel")
-            continue
-        hint = {"TZ": "Time zone, e.g. Europe/Amsterdam or UTC:",
-                "ENI_MENU_TIMEOUT": "Seconds before the boot menu boots the local disk (0 = wait forever):"}
-        try:
-            value = ask("Advanced", hint.get(c, f"New value for {c}:"), s.get(c) or get(s, c), cancel="Cancel")
-        except Cancel:
-            continue
-        old = s.get(c)
-        s[c] = value
-        errors = validate(s)
-        if c == "TZ" and not os.path.exists(os.path.join("/usr/share/zoneinfo", value)):
-            errors.append("unknown time zone")
-        if c == "ENI_MENU_TIMEOUT" and value and not value.isdigit():
-            errors.append("the timeout must be a number")
-        if errors:
-            msg("Advanced", "\n".join(errors))
-            if old is None:
-                s.pop(c, None)
-            else:
-                s[c] = old
-
-
 def summary(s):
     net = ("DHCP" if get(s, "NET_MODE") == "dhcp" else
            f"{get(s, 'NET_ADDRESS')} gw {get(s, 'NET_GATEWAY') or '-'} dns {get(s, 'NET_DNS') or '-'}")
-    return "\n".join([
-        f"Network          {net}",
-        f"Server address   {'this VM (' + (primary_ip() or '?') + ')' if get(s, 'SERVER_IP') == 'auto' else get(s, 'SERVER_IP')}",
-        f"Language         {dict(LANGUAGES)[get(s, 'ENI_LANGUAGE')]}",
-        f"Mirror           {get(s, 'EVE_LTS_LINES')} LTS lines, {get(s, 'EVE_ARCHES')}, {get(s, 'EVE_FLAVOURS')}",
-        f"Controller       {s.get('EVE_DEFAULT_INSTALL_SERVER') or 'from the ISO'}",
-        f"Serial console   {s.get('EVE_DEFAULT_SERIAL') or 'none'}",
-        f"Import share     {'yes' if get(s, 'SMB_IMPORT_SHARE') == 'yes' else 'no'}",
-    ])
+    server = (tr("adm_this_vm", ip=primary_ip() or "?") if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP"))
+    rows_ = [(tr("adm_sec_network"), net), (tr("adm_sec_server"), server),
+             (tr("adm_sec_language"), dict(LANGUAGES)[get(s, "ENI_LANGUAGE")]),
+             (tr("adm_sec_mirror"), tr("adm_mirror_summary", n=get(s, "EVE_LTS_LINES"), arches=get(s, "EVE_ARCHES"),
+                                       flavours=get(s, "EVE_FLAVOURS"))),
+             (label("EVE_DEFAULT_INSTALL_SERVER"), shown_value(s, "EVE_DEFAULT_INSTALL_SERVER")),
+             (label("EVE_DEFAULT_SERIAL"), option("EVE_DEFAULT_SERIAL", s.get("EVE_DEFAULT_SERIAL") or "none")),
+             (tr("adm_sec_share"), shown_value(s, "SMB_IMPORT_SHARE"))]
+    width = max(len(k) for k, _ in rows_)
+    return "\n".join(f"{k:<{width}}  {v}" for k, v in rows_)
 
 
-def apply_with_feedback(s, title="Applying"):
-    info(title, "Applying the settings and starting the services.\n\n"
-         "The first start takes up to a minute. Please wait ...")
+def apply_with_feedback(s, title=None):
+    info(title or tr("adm_applying"), tr("adm_applying_text"))
     try:
         clean = apply(s)
     except Exception as e:  # noqa: BLE001
         log(f"apply failed: {e}")
-        msg("Error", f"The settings could not be applied:\n\n{e}\n\nDetails: {LOG}")
+        msg(tr("adm_error"), tr("adm_apply_failed", error=e, log=LOG), tone="err")
         return None
+    finally:
+        set_language(None)   # from now on: the saved language
     return clean
+
+
+def settings_files():
+    """Exported settings files someone put into the import folder (SMB share)."""
+    try:
+        names = os.listdir(IMPORT)
+    except OSError:
+        return []
+    return sorted(n for n in names if n.lower().endswith((".txt", ".env")) and not n.startswith(".")
+                  and os.path.isfile(os.path.join(IMPORT, n)))[:12]
+
+
+def import_dialog(title):
+    """Settings of another VM: from the address its export shows, or from an
+    exported file copied into the import folder. Raises Cancel."""
+    files = settings_files()
+    c = "url"
+    if files:
+        c = choose(title, tr("adm_imp_where"), [("url", tr("adm_imp_from_url"))] +
+                   [("file:" + n, tr("adm_imp_from_file", file=n)) for n in files], cancel=tr("adm_btn_cancel"))
+    if c == "url":
+        url = ask(title, tr("adm_imp_ask_url"), cancel=tr("adm_btn_cancel"))
+        return fetch_import(url)
+    found = parse_env(read(os.path.join(IMPORT, c[5:])))
+    if not found:
+        raise ValueError(tr("adm_imp_none"))
+    return found
 
 
 def wizard():
     """First-time setup on the console. Returns when the appliance is set up."""
+    global _abort_if
+    _abort_if = is_configured
+    try:
+        _wizard()
+    finally:
+        _abort_if = None
+
+
+def _wizard():
     s = load_settings()
-    steps = ["welcome", "password", "network", "server", "language", "mirror", "defaults", "smb", "confirm"]
+    steps = ["language", "welcome", "password", "network", "server", "mirror", "defaults", "smb", "confirm"]
     i = 0
     while True:
         if is_configured():
+            set_language(None)
             return   # set up in the meantime (web setup or cloud-init)
         step = steps[i]
         try:
-            if step == "welcome":
-                c = choose("Welcome",
-                           "This VM is a network boot (PXE) server for LF Edge EVE-OS installers.\n"
-                           "A few questions and it is ready. Use the arrow keys, Enter and Tab.",
-                           [("new", "Set up this VM"),
-                            ("import", "Import the settings of another EVE-Netboot VM"),
-                            ("poweroff", "Power off")],
-                           cancel="Refresh", ok="Continue")
+            if step == "language":
+                s = screen_language(s, first=True)
+            elif step == "welcome":
+                c = choose(tr("adm_welcome"), tr("adm_welcome_text") + "\n" + tr("adm_keys_hint"),
+                           [("new", tr("adm_setup_new")), ("import", tr("adm_setup_import")),
+                            ("poweroff", tr("adm_poweroff"))], ok=tr("adm_btn_continue"))
                 if c == "poweroff":
-                    if yesno("Power off", "Power off this VM?", default_no=True):
+                    if yesno(tr("adm_poweroff"), tr("adm_poweroff_q"), default_no=True, tone="err"):
                         run(["systemctl", "poweroff"], check=False)
                     continue
                 if c == "import":
-                    url = ask("Import settings",
-                              "On the other VM choose 'Export settings' in the menu; it shows an\n"
-                              "address. Type that address here (or any URL of a settings file):")
                     try:
-                        s = merge(s, fetch_import(url))
-                        msg("Import settings", "Settings imported. Please check them in the next steps.")
+                        s = merge(s, import_dialog(tr("adm_import")))
+                        set_language(get(s, "ENI_LANGUAGE"))
+                        msg(tr("adm_import"), tr("adm_imp_done_check"), tone="ok")
+                    except Cancel:
+                        continue
                     except Exception as e:  # noqa: BLE001
-                        msg("Import settings", f"Could not import the settings:\n\n{e}")
+                        msg(tr("adm_import"), tr("adm_imp_failed", error=e), tone="err")
                         continue
             elif step == "password":
-                s["ADMIN_PASSWORD"] = ask_password("Admin password")
+                s["ADMIN_PASSWORD"] = ask_password(tr("adm_admin_password"))
             elif step == "network":
-                new = screen_network(s)
+                new = screen_network(s, hostname=False)
                 if render_networkd(new) != render_networkd(s) or not os.path.exists(NET_DHCP):
                     apply_network(new)  # so the next screens see the new address
                 s = new
             elif step == "server":
                 s = screen_server_ip(s)
-            elif step == "language":
-                s = screen_language(s)
             elif step == "mirror":
                 s = screen_mirror(s)
             elif step == "defaults":
@@ -1188,13 +1451,15 @@ def wizard():
             elif step == "smb":
                 s = screen_smb(s)
             elif step == "confirm":
-                if not yesno("Ready", summary(s) + "\n\nApply these settings and start?",
-                             yes="Apply", no="Back"):
+                if not yesno(tr("adm_ready"), summary(s) + "\n\n" + tr("adm_ready_q"),
+                             yes=tr("adm_btn_apply"), no=tr("adm_btn_back")):
                     raise Cancel
                 # set up on the console: web management stays off unless switched on
-                # (menu -> Advanced settings)
+                # (menu -> Access and system)
                 s.setdefault("WEB_ADMIN", "no")
-                if apply_with_feedback(s, "Setting up") is not None:
+                global _abort_if
+                _abort_if = None    # set up here from now on: keep showing its messages
+                if apply_with_feedback(s, tr("adm_setting_up")) is not None:
                     return
                 continue
             i += 1
@@ -1202,101 +1467,106 @@ def wizard():
             i = max(0, i - 1)
 
 
+def show_log(source):
+    if source in ("sync", "tftp", "web"):
+        p = compose("logs", "--no-color", "--tail", "300", source, check=False, quiet=True)
+        text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stdout + p.stderr)
+    elif source == "appliance":
+        text = "\n".join(read(LOG).splitlines()[-300:])
+    else:
+        text = run(["journalctl", "--no-pager", "-n", "300", "-u", "eve-netboot-setup", "-u", "eve-netboot-web",
+                    "-u", "docker"], check=False, quiet=True).stdout
+    path = "/tmp/eve-netboot-logs.txt"
+    write(path, text or "-\n")
+    wt("--textbox", tr("adm_log_title", source=option("LOG", source)), path, height=22, width=78,
+       extra=["--scrolltext", "--ok-button", tr("adm_btn_ok")])
+
+
 def menu():
-    """Settings menu (admin). Exit code 10 = open a shell, 0 = log out."""
+    """Settings menu (admin): the same pages as the web UI. Exit code 10 = open
+    a shell, 0 = log out."""
     while True:
         s = load_settings()
         try:
-            c = choose("Menu", "\n".join(status_lines()[2:5]) + "\n", [
-                ("status", "Status"),
-                ("network", "Network"),
-                ("server", "Server address (for DHCP and the boot menu)"),
-                ("mirror", "What to mirror (architectures, variants, releases)"),
-                ("language", "Language of the boot menu"),
-                ("defaults", "Installer defaults (controller, serial console)"),
-                ("smb", "Import share (SMB)"),
-                ("advanced", "Advanced settings"),
-                ("sync", "Check GitHub for new EVE-OS releases now"),
-                ("logs", "Show the log"),
-                ("export", "Export settings (for a new VM)"),
-                ("import", "Import settings"),
-                ("update", "Update the system (Debian packages)"),
-                ("app", "Update EVE-Netboot-Installer"),
-                ("password", "Change the admin password"),
-                ("shell", "Command line"),
-                ("reboot", "Reboot"),
-                ("poweroff", "Power off"),
-                ("logout", "Log out"),
-            ], cancel="Log out", ok="Open")
+            c = choose(tr("adm_menu"), "\n".join(status_lines()[2:5]) + "\n", [
+                ("status", tr("adm_nav_status")),
+                ("network", tr("adm_sec_network")),
+                ("server", tr("adm_sec_server")),
+                ("mirror", tr("adm_sec_mirror")),
+                ("bootmenu", tr("adm_sec_bootmenu")),
+                ("defaults", tr("adm_sec_defaults")),
+                ("share", tr("adm_sec_share")),
+                ("access", tr("adm_sec_access")),
+                ("sync", tr("adm_sync_now")),
+                ("logs", tr("adm_nav_logs")),
+                ("export", tr("adm_export_menu")),
+                ("import", tr("adm_import")),
+                ("update", tr("adm_update_system")),
+                ("app", tr("adm_update_app")),
+                ("password", tr("adm_change_password")),
+                ("shell", tr("adm_shell")),
+                ("reboot", tr("adm_reboot")),
+                ("poweroff", tr("adm_poweroff")),
+                ("logout", tr("adm_logout")),
+            ], cancel=tr("adm_logout"), ok=tr("adm_btn_open"))
         except Cancel:
             return 0
         try:
             if c == "status":
-                msg("Status", "\n".join(status_lines()))
-            elif c in ("network", "server", "mirror", "language", "defaults", "smb", "advanced"):
-                new = {"network": screen_network, "server": screen_server_ip, "mirror": screen_mirror,
-                       "language": screen_language, "defaults": screen_defaults, "smb": screen_smb,
-                       "advanced": screen_advanced}[c](s)
-                if new != s or c == "smb":
+                msg(tr("adm_nav_status"), "\n".join(status_lines()))
+            elif c in SECTIONS:
+                new = screen_network(s) if c == "network" else screen_section(c, s)
+                if new != s or "SMB_PASSWORD" in new:
                     if c == "network" and os.environ.get("SSH_CONNECTION") and not yesno(
-                            "Network", "You are connected over SSH. If the address changes, the connection "
-                            "drops and you have to reconnect to the new address. Continue?", default_no=True):
+                            tr("adm_sec_network"), tr("adm_net_ssh_warning"), default_no=True, tone="warn"):
                         continue
                     apply_with_feedback(new)
             elif c == "sync":
-                info("GitHub", "Restarting the sync ...")
                 compose("restart", "sync", check=False)
-                msg("GitHub", "The check runs in the background; new releases appear on the status page.")
+                msg("GitHub", tr("adm_sync_started"), tone="ok")
             elif c == "logs":
-                p = compose("logs", "--no-color", "--tail", "200", "sync", check=False)
-                path = "/tmp/eve-netboot-logs.txt"
-                write(path, p.stdout + p.stderr)
-                wt("--textbox", "Log (sync, last 200 lines)", path, height=22, width=78, extra=["--scrolltext"])
+                source = choose(tr("adm_nav_logs"), tr("adm_logs_text"),
+                                [(x, option("LOG", x)) for x in ("sync", "tftp", "web", "appliance", "system")],
+                                cancel=tr("adm_btn_back"), ok=tr("adm_btn_open"))
+                show_log(source)
             elif c == "export":
                 url = publish_export(s)
-                home_copy = f"/home/{ADMIN}/eve-netboot-settings.txt"
-                write(home_copy, render_export(s))
-                shutil.chown(home_copy, ADMIN, ADMIN)
-                msg("Export settings",
-                    f"The settings are available for 15 minutes at:\n\n   {url}\n\n"
-                    "- In a new VM: choose 'Import the settings ...' in the setup and type this address.\n"
-                    "- Or save the page and use its text as the cloud-init user-data of a new VM.\n\n"
-                    f"Also saved as /home/{ADMIN}/eve-netboot-settings.txt. Passwords are not included.")
+                copies = [f"/home/{ADMIN}/eve-netboot-settings.txt", os.path.join(IMPORT, "eve-netboot-settings.txt")]
+                for path in copies:
+                    write(path, render_export(s))
+                    shutil.chown(path, ADMIN, ADMIN)
+                msg(tr("adm_export_menu"), tr("adm_export_done", url=url, home=copies[0],
+                                               share=f"\\\\{primary_ip() or 'VM'}\\eve-import\\eve-netboot-settings.txt"))
             elif c == "import":
-                url = ask("Import settings", "Address of the settings (shown by 'Export settings' on the other VM):",
-                          cancel="Cancel")
-                new = merge(s, fetch_import(url))
-                if yesno("Import settings", summary(new) + "\n\nApply these settings?", yes="Apply", no="Cancel"):
+                new = merge(s, import_dialog(tr("adm_import")))
+                if yesno(tr("adm_import"), summary(new) + "\n\n" + tr("adm_imp_apply_q"),
+                         yes=tr("adm_btn_apply"), no=tr("adm_btn_cancel")):
                     apply_with_feedback(new)
             elif c == "update":
-                if yesno("Update the system",
-                         "Install the newest Debian updates now?\n\n"
-                         "Security updates are also installed automatically every day.\n"
-                         "Tip: take a snapshot of the VM first if your hypervisor supports it.",
-                         yes="Update", no="Cancel"):
-                    ok, reboot, text = update_system(lambda t: info("Updating", t))
-                    if reboot and yesno("Update the system", text + "\n\nReboot now?", yes="Reboot", no="Later"):
+                if yesno(tr("adm_update_system"), tr("adm_update_system_q"),
+                         yes=tr("adm_btn_update"), no=tr("adm_btn_cancel")):
+                    ok, reboot, text = update_system(lambda t: info(tr("adm_updating"), t))
+                    if reboot and yesno(tr("adm_update_system"), text + "\n\n" + tr("adm_reboot_now_q"),
+                                        yes=tr("adm_btn_reboot"), no=tr("adm_btn_later"), tone="warn"):
                         run(["systemctl", "reboot"], check=False)
                     elif not reboot:
-                        msg("Update the system", text)
+                        msg(tr("adm_update_system"), text, tone="ok" if ok else "err")
             elif c == "app":
-                if yesno("Update EVE-Netboot-Installer",
-                         f"Now running: {current_image(s)}\n\nLook for a newer release and install it?\n"
-                         "If the new version does not start, the current one is restored automatically.",
-                         yes="Update", no="Cancel"):
-                    ok, text = update_app(lambda t: info("Updating", t))
-                    msg("Update EVE-Netboot-Installer", text)
+                if yesno(tr("adm_update_app"), tr("adm_update_app_q", image=current_image(s)),
+                         yes=tr("adm_btn_update"), no=tr("adm_btn_cancel")):
+                    ok, text = update_app(lambda t: info(tr("adm_updating"), t))
+                    msg(tr("adm_update_app"), text, tone="ok" if ok else "err")
             elif c == "password":
-                pw = ask_password("Admin password")
+                pw = ask_password(tr("adm_admin_password"))
                 run(["chpasswd"], input=f"{ADMIN}:{pw}\n")
-                msg("Admin password", "The password has been changed.")
+                msg(tr("adm_admin_password"), tr("adm_password_changed"), tone="ok")
             elif c == "shell":
                 return 10
             elif c == "reboot":
-                if yesno("Reboot", "Reboot this VM now?", default_no=True):
+                if yesno(tr("adm_reboot"), tr("adm_reboot_q"), default_no=True, tone="warn"):
                     run(["systemctl", "reboot"], check=False)
             elif c == "poweroff":
-                if yesno("Power off", "Power off this VM now?", default_no=True):
+                if yesno(tr("adm_poweroff"), tr("adm_poweroff_q"), default_no=True, tone="err"):
                     run(["systemctl", "poweroff"], check=False)
             elif c == "logout":
                 return 0
@@ -1304,74 +1574,248 @@ def menu():
             continue
         except Exception as e:  # noqa: BLE001
             log(f"menu: {c}: {e}")
-            msg("Error", f"{e}\n\nDetails: {LOG}")
+            msg(tr("adm_error"), f"{e}\n\n{tr('adm_details')}: {LOG}", tone="err")
+
+
+# --------------------------------------------------------------------------
+# the status screen on tty1, in the style of the EVE monitor: tabs at the
+# top, boxes with a title, coloured states, the keys and a clock at the bottom
+# --------------------------------------------------------------------------
+TABS = ("status", "images", "log")
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+TONES = {"ok": "1;32", "warn": "1;33", "err": "1;31", "dim": "90", "bold": "1;97", "label": "37", "value": "97",
+         "link": "36", "key": "30;47"}
+
+
+def paint(text, tone):
+    return f"\x1b[{TONES[tone]}m{text}\x1b[0m" if tone in TONES else text
+
+
+def width_of(text):
+    return len(ANSI_RE.sub("", text))
+
+
+def cut(text, width):
+    """Plain text shortened to width characters."""
+    return text if len(text) <= width else text[:max(0, width - 1)] + "…"
+
+
+def box(title, lines, width):
+    """A box drawn with lines, the title in the top border. lines may carry colours."""
+    inner = width - 4
+    title = cut(title, width - 6)
+    top = "┌─ " + paint(title, "bold") + " " + "─" * max(0, width - 5 - len(title)) + "┐"
+    out = [top]
+    for line in lines:
+        out.append("│ " + line + " " * max(0, inner - width_of(line)) + " │")
+    out.append("└" + "─" * (width - 2) + "┘")
+    return out
+
+
+def kv_lines(pairs, inner):
+    """[(label, value, tone)] -> aligned lines of at most inner characters."""
+    lw = min(max((len(k) for k, _, _ in pairs), default=0), inner // 2)
+    return [paint(f"{cut(k, lw):<{lw}}", "label") + "  " + paint(cut(v, inner - lw - 2), tone or value_tone(v))
+            for k, v, tone in pairs]
+
+
+def value_tone(value):
+    """Addresses (URLs, shares, IPs) in cyan, like links; the rest plain white."""
+    return "link" if re.match(r"^(https?://|\\\\|\d+\.\d+\.\d+\.\d+)", value) else "value"
+
+
+def service_tone(state):
+    return {"running": "ok", "restarting": "warn", "created": "warn"}.get(state, "err")
+
+
+def entry_state(e, activity):
+    if e.get("error"):
+        return tr("adm_img_error"), "err"
+    if not e.get("netboot_ok"):
+        return tr("adm_img_not_netboot"), "warn"
+    return tr("adm_img_ready"), "ok"
+
+
+def dashboard(tab, info, cols, lines_):
+    """The status screen as a list of lines (with colours) of at most cols characters."""
+    width = min(cols, 200)
+    inner = width - 4
+    head = paint(f" {PRODUCT} ", "bold") + " "
+    for i, t in enumerate(TABS):
+        name = f" {tr('adm_tab_' + t)} "
+        head += f"\x1b[30;47m{name}\x1b[0m" if i == tab else name
+        head += paint("│", "dim")
+    host = f"{info['hostname']}  {info['version']} "
+    if width_of(head) + len(host) < width:
+        head += " " * (width - width_of(head) - len(host)) + paint(host, "dim")
+    body = []
+    if TABS[tab] == "status":
+        body += box(tr("adm_box_server"), kv_lines(status_rows(info), inner), width)
+        if info["configured"]:
+            sip = info["server_ip"]
+            body += box(tr("adm_box_dhcp"), kv_lines([
+                ("next-server", sip, ""),
+                (tr("adm_st_boot_file") + " x86_64", "eve-x86_64.efi", ""),
+                (tr("adm_st_boot_file") + " arm64", "eve-arm64.efi", "")], inner), width)
+            pairs = [(x, info["services"].get(x, "missing"), service_tone(info["services"].get(x, "missing")))
+                     for x in ("sync", "tftp", "web")]
+            act = info.get("activity") or {}
+            if act.get("state") in ("downloading", "importing"):
+                pairs.append((tr("adm_st_activity"), f"{act.get('item', '')} {act.get('percent', 0)}%", "warn"))
+            pairs += [(tr("adm_st_installers"), tr("adm_st_installers_value", n=info["ready"],
+                                                   date=info["github_checked"] or "-"),
+                       "ok" if info["ready"] else "warn"),
+                      (tr("adm_st_disk"), tr("adm_st_disk_value", used=f"{info['disk_used']:.1f}",
+                                             free=f"{info['disk_free']:.1f}"),
+                       "err" if info["disk_free"] < 2 else "")]
+            if info["reboot_required"]:
+                pairs.append((tr("adm_st_updates"), tr("adm_st_reboot_needed"), "warn"))
+            body += box(tr("adm_box_services"), kv_lines(pairs, inner), width)
+        if info["last_error"]:
+            body += box(tr("adm_st_last_error"), [paint(cut(info["last_error"], inner), "err")], width)
+    elif TABS[tab] == "images":
+        entries = info.get("entries") or []
+        rows_ = []
+        for e in entries:
+            name = (e.get("tag") or "") if e.get("source") == "github" else (e.get("name") or e.get("file") or "")
+            src = "GitHub" if e.get("source") == "github" else tr("src_local")
+            state, tone = entry_state(e, info.get("activity"))
+            rows_.append((name, e.get("arch") or "?", e.get("variant") or "", src, state, tone))
+        nw = max([len(tr("adm_col_name"))] + [len(r[0]) for r in rows_])
+        vw = max(4, min(10, len(tr("th_variant"))))
+        nw = min(nw, inner - 36 - vw)
+        fmt = f"{{:<{nw}}}  {{:<6}} {{:<{vw}}} {{:<11}} "
+        table = [paint(fmt.format(tr("adm_col_name"), cut(tr("th_arch"), 6), cut(tr("th_variant"), vw),
+                                  cut(tr("adm_col_source"), 11)) + tr("adm_col_state"), "dim")]
+        room = max(1, lines_ - 6)
+        for r in rows_[:room]:
+            table.append(fmt.format(cut(r[0], nw), r[1], r[2], cut(r[3], 11)) + paint(cut(r[4], inner - nw - 22 - vw), r[5]))
+        if len(rows_) > room:
+            table.append(paint(tr("adm_more", n=len(rows_) - room), "dim"))
+        if not rows_:
+            table.append(tr("adm_no_images"))
+        body += box(tr("adm_tab_images"), table, width)
+    else:
+        room = max(1, lines_ - 4)
+        log_lines = [cut(x, inner) for x in read(LOG).splitlines()[-room:]]
+        body += box(tr("adm_tab_log") + f" ({LOG})", log_lines or ["-"], width)
+    body = body[:max(0, lines_ - 2)]
+    clock = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # "Enter: log in │ ..." -> the key names highlighted, the separators dim
+    keys = tr("adm_footer_keys")
+    highlighted = re.sub(r"(^|│ )([^:│]+)(:)", lambda m: m.group(1) + paint(f" {m.group(2)} ", "key") + m.group(3),
+                         keys).replace("│", paint("│", "dim"))
+    if width_of(highlighted) + len(clock) + 2 > width:
+        highlighted = cut(keys, width - len(clock) - 3)
+    # one column short of the edge: "erase line" in the last column of the Linux
+    # console would also erase the clock's last digit
+    foot = " " + highlighted + " " * (width - width_of(highlighted) - len(clock) - 2) + paint(clock, "bold")
+    filler = [""] * max(0, lines_ - 2 - len(body))
+    return [head] + body + filler + [foot]
+
+
+class Keys:
+    """Single key presses from the console, without echo."""
+
+    def __enter__(self):
+        import termios
+        self.fd = sys.stdin.fileno()
+        try:
+            self.old = termios.tcgetattr(self.fd)
+        except termios.error:
+            self.old = None
+            return self
+        new = termios.tcgetattr(self.fd)
+        new[3] &= ~(termios.ECHO | termios.ICANON)
+        termios.tcsetattr(self.fd, termios.TCSANOW, new)
+        termios.tcflush(self.fd, termios.TCIFLUSH)
+        return self
+
+    def __exit__(self, *exc):
+        import termios
+        if self.old is not None:
+            termios.tcsetattr(self.fd, termios.TCSANOW, self.old)
+
+    def read(self, timeout):
+        """'enter', 'left', 'right', a character, or None after timeout seconds."""
+        import select
+        if self.old is None:
+            time.sleep(timeout)
+            return None
+        r, _, _ = select.select([self.fd], [], [], timeout)
+        if not r:
+            return None
+        data = os.read(self.fd, 32)
+        if b"\r" in data or b"\n" in data:
+            return "enter"
+        if data.startswith(b"\x1b[") or data.startswith(b"\x1bO"):
+            last = data[-1:]
+            return {b"C": "right", b"D": "left"}.get(last)
+        if data == b"\t":
+            return "right"
+        return data[:1].decode("latin-1")
+
+
+def status_screen():
+    """The status with tabs until Enter is pressed."""
+    tab, info, fetched = 0, None, 0.0
+    sys.stdout.write("\x1b[?25l\x1b[2J")
+    try:
+        with Keys() as keys:
+            while True:
+                if info is None or time.time() - fetched > 5:
+                    info, fetched = status_info(), time.time()
+                cols, lines_ = shutil.get_terminal_size((80, 25))
+                screen = dashboard(tab, info, cols, lines_)
+                sys.stdout.write("\x1b[H" + "\n".join(line + "\x1b[K" for line in screen) + "\x1b[J")
+                sys.stdout.flush()
+                k = keys.read(1.0)
+                if k == "enter":
+                    return
+                if k == "right":
+                    tab = (tab + 1) % len(TABS)
+                elif k == "left":
+                    tab = (tab - 1) % len(TABS)
+                elif k in ("1", "2", "3"):
+                    tab = int(k) - 1
+                elif k in ("r", "R"):
+                    info = None
+    finally:
+        sys.stdout.write("\x1b[0m\x1b[?25h\x1b[2J\x1b[H")
+        sys.stdout.flush()
 
 
 def console():
-    """tty1: wizard until set up, then status + login to the menu."""
+    """tty1: wizard until set up, then the status screen and a login to the menu."""
     os.environ.setdefault("TERM", "linux")
     # settings from cloud-init are applied by "eve-netboot boot": wait for it, or
     # the wizard would start on a VM that is about to be set up
     started = time.time()
     while not os.path.exists(BOOT_DONE) and time.time() - started < 900:
-        print("\033[2J\033[H EVE-Netboot-Installer appliance\n\n Starting, please wait ...", flush=True)
+        print(f"\033[2J\033[H\n  {paint(PRODUCT, 'bold')}\n\n  {tr('adm_starting')}", flush=True)
         time.sleep(3)
     while True:
         if not is_configured():
             wizard()
             continue
-        print("\033[2J\033[H" + "\n".join(" " + line for line in status_lines()), flush=True)
-        if admin_has_password():
-            print("\n Press Enter to log in (user admin) and open the settings menu.", flush=True)
-        else:
-            print("\n No admin password is set yet. Press Enter to set one.", flush=True)
-        if not wait_enter(30):
-            continue
+        status_screen()
         try:
             if not admin_has_password():
-                pw = ask_password("Admin password")
+                pw = ask_password(tr("adm_admin_password"))
                 run(["chpasswd"], input=f"{ADMIN}:{pw}\n")
                 continue
-            pw = ask("Log in", f"Password of {ADMIN}:", password=True, cancel="Cancel")
+            pw = ask(tr("adm_login"), tr("adm_login_text", user=ADMIN), password=True, cancel=tr("adm_btn_cancel"))
         except Cancel:
             continue
         if not check_password(ADMIN, pw):
             log("console: wrong admin password")
             time.sleep(3)
-            msg("Log in", "Wrong password.")
+            msg(tr("adm_login"), tr("adm_wrong_password"), tone="err")
             continue
         if menu() == 10:
-            print("\033[2J\033[HType 'exit' to return to the status screen, 'eve-netboot menu' for the menu.\n",
-                  flush=True)
+            print("\033[2J\033[H" + tr("adm_shell_hint") + "\n", flush=True)
             subprocess.run(["su", "-w", "ENI_NO_MENU", "-", ADMIN],
                            env=dict(os.environ, ENI_NO_MENU="1"))
-
-
-def wait_enter(seconds):
-    """True when Enter is pressed within seconds; keys are not echoed."""
-    import select
-    import termios
-    fd = sys.stdin.fileno()
-    try:
-        old = termios.tcgetattr(fd)
-    except termios.error:
-        time.sleep(seconds)
-        return False
-    new = termios.tcgetattr(fd)
-    new[3] &= ~(termios.ECHO | termios.ICANON)
-    try:
-        termios.tcsetattr(fd, termios.TCSANOW, new)
-        termios.tcflush(fd, termios.TCIFLUSH)
-        end = time.time() + seconds
-        while time.time() < end:
-            r, _, _ = select.select([fd], [], [], max(0.1, end - time.time()))
-            if r:
-                data = os.read(fd, 64)
-                if b"\r" in data or b"\n" in data:
-                    return True
-        return False
-    finally:
-        termios.tcsetattr(fd, termios.TCSANOW, old)
 
 
 # --------------------------------------------------------------------------

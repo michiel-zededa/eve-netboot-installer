@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getSession, type Session, type SettingsInfo, api } from "./admin";
+import { getSession, type Session, type SettingsInfo, api, setApiLanguage } from "./admin";
 import { loadActivity, loadStatus, loadTexts, type Activity, type Status } from "./api";
 import { ToastHost } from "./forms";
 import { fallback, TextsContext, type Texts } from "./i18n";
@@ -79,11 +79,26 @@ export default function App() {
     setLoaded(true);
   }, []);
 
+  const applyTexts = useCallback((t: { language: string; texts: Texts } | null) => {
+    if (!t) return;
+    setTexts({ ...fallback, ...t.texts });
+    document.documentElement.lang = t.language;
+    setApiLanguage(t.language);
+  }, []);
+
+  // the appliance's management port: texts from the API, in any language
+  // (the web setup switches as soon as a language is chosen)
+  const changeLanguage = useCallback((lang?: string) => {
+    api.texts(lang).then(applyTexts).catch(() => {});
+  }, [applyTexts]);
+
   const refreshSession = useCallback(async () => {
     const s = await getSession();
     setSession(s);
+    if (s) changeLanguage();
+    else loadTexts().then(applyTexts);
     if (s?.authenticated) api.settings().then(setInfo).catch(() => {});
-  }, []);
+  }, [changeLanguage, applyTexts]);
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -92,12 +107,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadTexts().then((t) => {
-      if (t) {
-        setTexts({ ...fallback, ...t.texts });
-        document.documentElement.lang = t.language;
-      }
-    });
     refreshSession();
     refresh();
     const id = setInterval(refresh, POLL_MS);
@@ -115,7 +124,8 @@ export default function App() {
   } else if (route.page === "confirm") {
     content = <ConfirmNetwork token={route.token} />;
   } else if (session && !session.configured) {
-    content = <Setup onDone={() => { location.hash = "#/"; refreshSession(); refresh(); }} />;
+    content = <Setup onLanguage={changeLanguage}
+      onDone={() => { location.hash = "#/"; refreshSession(); refresh(); }} />;
   } else if (session && !session.authenticated) {
     content = <Login hostname={session.hostname} onLogin={refreshSession} />;
   } else {
@@ -129,13 +139,13 @@ export default function App() {
         ) : route.page === "boot" ? (
           <Boot status={status} />
         ) : admin && route.page === "settings" ? (
-          <Settings section={route.section} />
+          <Settings section={route.section} onSaved={() => changeLanguage()} />
         ) : admin && route.page === "logs" ? (
           <Logs />
         ) : admin && route.page === "updates" ? (
           <Updates info={info} />
         ) : admin && route.page === "backup" ? (
-          <Backup />
+          <Backup onSaved={() => changeLanguage()} />
         ) : admin && route.page === "system" ? (
           <System />
         ) : (

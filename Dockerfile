@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# EVE-Netboot-Installer
+# EVE Netboot Installer
 #   stage 1 (ipxe): builds iPXE x86_64 + arm64 EFI binaries with a small
 #                   generic embedded script (docker/embed.ipxe)
 #   stage 2 (ui):   builds the React web UI (ui/) into static files
@@ -38,7 +38,7 @@ COPY --from=ui /src/ui/dist/ /app/ui/
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh \
  && python3 -m compileall -q /app
-LABEL org.opencontainers.image.title="EVE-Netboot-Installer" \
+LABEL org.opencontainers.image.title="EVE Netboot Installer" \
       org.opencontainers.image.description="PXE/iPXE boot server for LF Edge EVE-OS installers"
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sync"]

@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
-import { Download, KeyRound, Power, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, FileUp, KeyRound, Power, RefreshCw, RotateCcw, Upload } from "lucide-react";
 import { api, waitJob, type Job, type SettingsInfo } from "../admin";
 import { Card, PageHeader } from "../components";
 import {
   Confirm, errorText, RollbackDialog, SaveStatus, SECRET_FIELDS, useSaver, useToast, type Values,
 } from "../forms";
+import { PRODUCT, useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
 export function Logs() {
+  const t = useT();
   const [source, setSource] = useState("sync");
   const [lines, setLines] = useState(300);
   const [text, setText] = useState("");
@@ -18,27 +20,25 @@ export function Logs() {
   useEffect(() => {
     load();
     if (!auto) return;
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
   }, [load, auto]);
-  const sources: [string, string][] = [
-    ["sync", "Mirror (sync)"], ["tftp", "TFTP"], ["web", "Web server"], ["appliance", "Appliance"], ["system", "System"],
-  ];
+  const sources = ["sync", "tftp", "web", "appliance", "system"].map((v): [string, string] => [v, t(`adm_o_log_${v}`)]);
   return (
     <div className="page">
-      <PageHeader title="Logs" subtitle="The newest lines; refreshed every 5 seconds." />
+      <PageHeader title={t("adm_nav_logs")} subtitle={t("adm_logs_subtitle")} />
       <div className="tabs">
         {sources.map(([v, l]) => (
           <button key={v} className={`tab${source === v ? " active" : ""}`} onClick={() => setSource(v)}>{l}</button>
         ))}
       </div>
       <div className="toolbar">
-        <select value={lines} onChange={(e) => setLines(Number(e.target.value))} aria-label="Lines">
-          {[100, 300, 1000, 5000].map((n) => <option key={n} value={n}>{n} lines</option>)}
+        <select value={lines} onChange={(e) => setLines(Number(e.target.value))} aria-label={t("adm_lines_label")}>
+          {[100, 300, 1000, 5000].map((n) => <option key={n} value={n}>{t("adm_lines", { n })}</option>)}
         </select>
-        <label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto refresh</label>
+        <label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> {t("adm_auto_refresh")}</label>
         <div className="toolbar-right">
-          <button className="btn slim" onClick={load}><RefreshCw size={16} /> Refresh</button>
+          <button className="btn slim" onClick={load}><RefreshCw size={16} /> {t("ui_refresh")}</button>
         </div>
       </div>
       <pre className="card log">{text || " "}</pre>
@@ -58,6 +58,7 @@ function JobView({ job }: { job: Job | null }) {
 }
 
 export function Updates({ info }: { info: SettingsInfo | null }) {
+  const t = useT();
   const toast = useToast();
   const [job, setJob] = useState<Job | null>(null);
   const [ask, setAsk] = useState<"" | "update-system" | "update-app" | "reboot">("");
@@ -66,9 +67,11 @@ export function Updates({ info }: { info: SettingsInfo | null }) {
       const { job: id } = await api.action(name);
       const done = await waitJob(id!, (messages) => setJob((j) => ({ ...(j ?? { id: id!, kind: name, state: "running", result: null }), messages })));
       setJob(done);
-      const result = done.result as { message?: string; reboot?: boolean } | null;
+      const result = done.result as { ok?: boolean; message?: string; reboot?: boolean } | null;
       if (result?.message) setJob({ ...done, messages: [...done.messages, result.message] });
-      toast(done.state === "done" ? "Update finished." : "Update failed.", done.state === "done" ? "ok" : "err");
+      // a job can finish without updating (already current, a development build)
+      const ok = done.state === "done" && result?.ok !== false;
+      toast(ok ? t("adm_update_finished") : result?.message ?? t("adm_update_failed"), ok ? "ok" : "err");
       if (result?.reboot) setAsk("reboot");
     } catch (e) {
       toast(errorText(e), "err");
@@ -76,56 +79,70 @@ export function Updates({ info }: { info: SettingsInfo | null }) {
   };
   return (
     <div className="page">
-      <PageHeader title="Updates" subtitle="Debian security updates are installed automatically every day." />
+      <PageHeader title={t("adm_nav_updates")} subtitle={t("adm_updates_subtitle")} />
       <div className="grid-2">
-        <Card title="System (Debian packages)">
-          <p>Install all available Debian updates now. The appliance's own packages are protected, and its services
-            are checked afterwards. A reboot is offered when a new kernel was installed.</p>
-          <p className="muted small">Tip: take a snapshot of the VM first if your hypervisor supports it.</p>
+        <Card title={t("adm_updates_system_title")}>
+          <p>{t("adm_updates_system_text")}</p>
+          <p className="muted small">{t("adm_snapshot_tip")}</p>
           <button className="btn primary" disabled={job?.state === "running"} onClick={() => setAsk("update-system")}>
-            <Download size={16} /> Update the system
+            <Download size={16} /> {t("adm_update_system")}
           </button>
         </Card>
-        <Card title="EVE-Netboot-Installer">
-          <p>Install the newest release. If it does not start correctly, the current version is restored automatically.</p>
-          <p className="muted small">Now running: <code>{info?.image ?? "..."}</code></p>
+        <Card title={PRODUCT}>
+          <p>{t("adm_updates_app_text")}</p>
+          <p className="muted small">{t("adm_now_running")} <code>{info?.image ?? "..."}</code></p>
           <button className="btn primary" disabled={job?.state === "running"} onClick={() => setAsk("update-app")}>
-            <Download size={16} /> Update EVE-Netboot-Installer
+            <Download size={16} /> {t("adm_update_app")}
           </button>
         </Card>
       </div>
-      {job && <Card title="Progress"><JobView job={job} /></Card>}
+      {job && <Card title={t("adm_progress")}><JobView job={job} /></Card>}
       {(ask === "update-system" || ask === "update-app") && (
-        <Confirm title="Update" text={ask === "update-system" ? "Install the newest Debian updates now?"
-          : "Look for a newer EVE-Netboot-Installer release and install it?"}
-          confirm="Update" onConfirm={() => run(ask)} onClose={() => setAsk("")} />
+        <Confirm title={t("adm_btn_update")} text={ask === "update-system" ? t("adm_update_system_confirm")
+          : t("adm_update_app_confirm")}
+          confirm={t("adm_btn_update")} onConfirm={() => run(ask)} onClose={() => setAsk("")} />
       )}
       {ask === "reboot" && (
-        <Confirm title="Reboot needed" text="The updates need a reboot to take effect. Reboot now?" confirm="Reboot"
-          onConfirm={() => api.action("reboot").then(() => toast("Rebooting ..."))} onClose={() => setAsk("")} />
+        <Confirm title={t("adm_reboot_needed")} text={t("adm_reboot_needed_text")} confirm={t("adm_btn_reboot")}
+          onConfirm={() => api.action("reboot").then(() => toast(t("adm_rebooting")))} onClose={() => setAsk("")} />
       )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-export function Backup() {
+export function Backup({ onSaved }: { onSaved?: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [exported, setExported] = useState("");
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
+  const [file, setFile] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ changes: Values; current: Record<string, string> } | null>(null);
-  const { state, save, reset } = useSaver(() => toast("Imported settings applied."));
+  const { state, save, reset } = useSaver(() => {
+    toast(t("adm_imported_applied"));
+    onSaved?.();
+  });
 
   useEffect(() => {
     fetch("api/export", { credentials: "same-origin" }).then((r) => r.text()).then(setExported).catch(() => {});
   }, []);
 
-  const load = async () => {
+  // an exported settings file of another VM (eve-netboot-settings.txt)
+  const pickFile = async (f: File) => {
+    if (fileRef.current) fileRef.current.value = "";
+    if (f.size > 256 * 1024) return toast(t("adm_imp_not_a_settings_file"), "err");
+    setUrl("");
+    setFile(f.name);
+    const content = await f.text();
+    setText(content);
+    load({ text: content });
+  };
+
+  const load = async (from: { url?: string; text?: string } = url ? { url } : { text }) => {
     try {
-      const [{ settings }, current] = await Promise.all([
-        api.importSettings(url ? { url } : { text }), api.settings(),
-      ]);
+      const [{ settings }, current] = await Promise.all([api.importSettings(from), api.settings()]);
       const changes: Values = {};
       for (const [k, v] of Object.entries(settings)) {
         if (!SECRET_FIELDS.has(k) && current.settings[k] !== v) changes[k] = v;
@@ -138,27 +155,34 @@ export function Backup() {
 
   return (
     <div className="page">
-      <PageHeader title="Backup and restore"
-        subtitle="Export the settings to recreate this VM from a newer image, or import the settings of another VM." />
+      <PageHeader title={t("adm_nav_backup")} subtitle={t("adm_backup_subtitle")} />
       <div className="grid-2">
-        <Card title="Export">
-          <p>The settings as KEY=VALUE text. Use it as the cloud-init user-data of a new VM, or import it there.
-            Passwords and tokens are not included.</p>
-          <a className="btn primary" href="api/export" download><Download size={16} /> Download</a>
+        <Card title={t("adm_export")}>
+          <p>{t("adm_export_text")}</p>
+          <a className="btn primary" href="api/export" download><Download size={16} /> {t("adm_download")}</a>
           <pre className="log small-log">{exported}</pre>
         </Card>
-        <Card title="Import">
-          <label className="field-label" htmlFor="imp-url">Address shown by "Export settings" on another VM</label>
-          <input id="imp-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://192.168.1.20:8080/export-3fa9c1.txt" />
-          <label className="field-label" htmlFor="imp-text">or paste the text</label>
-          <textarea id="imp-text" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder="ENI_LANGUAGE=en" />
-          <button className="btn" disabled={!url && !text} onClick={load}><Upload size={16} /> Check</button>
+        <Card title={t("adm_import")}>
+          <label className="field-label">{t("adm_imp_file_label")}</label>
+          <div className="file-pick">
+            <input ref={fileRef} type="file" accept=".txt,.env,text/plain" hidden
+              onChange={(e) => e.target.files?.[0] && pickFile(e.target.files[0])} />
+            <button className="btn" onClick={() => fileRef.current?.click()}><FileUp size={16} /> {t("adm_imp_upload_file")}</button>
+            {file && <span className="muted small">{file}</span>}
+          </div>
+          <label className="field-label" htmlFor="imp-url">{t("adm_imp_or_url")}</label>
+          <input id="imp-url" value={url} onChange={(e) => { setUrl(e.target.value); setFile(""); }}
+            placeholder="http://192.168.1.20:8080/export-3fa9c1.txt" />
+          <label className="field-label" htmlFor="imp-text">{t("adm_imp_or_paste")}</label>
+          <textarea id="imp-text" rows={6} value={text} onChange={(e) => { setText(e.target.value); setFile(""); }}
+            placeholder="ENI_LANGUAGE=en" />
+          <button className="btn" disabled={!url && !text} onClick={() => load()}><Upload size={16} /> {t("adm_imp_check")}</button>
           {preview && (
             <div className="preview">
-              {Object.keys(preview.changes).length === 0 ? <p>Nothing would change.</p> : (
+              {Object.keys(preview.changes).length === 0 ? <p>{t("adm_imp_nothing")}</p> : (
                 <>
                   <table className="table compact">
-                    <thead><tr><th>Setting</th><th>Now</th><th>Imported</th></tr></thead>
+                    <thead><tr><th>{t("adm_col_setting")}</th><th>{t("adm_col_now")}</th><th>{t("adm_col_imported")}</th></tr></thead>
                     <tbody>
                       {Object.entries(preview.changes).map(([k, v]) => (
                         <tr key={k}><td><code>{k}</code></td><td>{preview.current[k] ?? "—"}</td><td>{v}</td></tr>
@@ -167,7 +191,7 @@ export function Backup() {
                   </table>
                   <div className="form-actions">
                     <button className="btn primary" disabled={state.phase === "saving"} onClick={() => save(preview.changes)}>
-                      Apply these settings
+                      {t("adm_imp_apply")}
                     </button>
                     <SaveStatus state={state} />
                   </div>
@@ -184,63 +208,62 @@ export function Backup() {
 
 // ---------------------------------------------------------------------------
 export function System() {
+  const t = useT();
   const toast = useToast();
   const [ask, setAsk] = useState<"" | "reboot" | "poweroff">("");
   const [pw, setPw] = useState({ current: "", next: "", again: "" });
   const changePassword = async () => {
-    if (pw.next !== pw.again) return toast("The new passwords do not match.", "err");
+    if (pw.next !== pw.again) return toast(t("adm_pw_mismatch"), "err");
     try {
       await api.password(pw.current, pw.next);
       setPw({ current: "", next: "", again: "" });
-      toast("The admin password has been changed.");
+      toast(t("adm_password_changed"));
     } catch (e) {
       toast(errorText(e), "err");
     }
   };
   return (
     <div className="page">
-      <PageHeader title="System" subtitle="Admin password, diagnostics and power." />
+      <PageHeader title={t("adm_nav_system")} subtitle={t("adm_system_subtitle")} />
       <div className="grid-2">
-        <Card title="Admin password">
-          <p className="muted small">For this page, the VM's screen menu and SSH.</p>
+        <Card title={t("adm_admin_password")}>
+          <p className="muted small">{t("adm_setup_password_text")}</p>
           <div className="fields">
-            <div className="field"><label className="field-label" htmlFor="pw-c">Current password</label>
+            <div className="field"><label className="field-label" htmlFor="pw-c">{t("adm_pw_current")}</label>
               <input id="pw-c" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></div>
-            <div className="field"><label className="field-label" htmlFor="pw-n">New password (at least 8 characters)</label>
+            <div className="field"><label className="field-label" htmlFor="pw-n">{t("adm_pw_label", { n: 8 })}</label>
               <input id="pw-n" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></div>
-            <div className="field"><label className="field-label" htmlFor="pw-a">New password again</label>
+            <div className="field"><label className="field-label" htmlFor="pw-a">{t("adm_pw_again_label")}</label>
               <input id="pw-a" type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></div>
           </div>
           <button className="btn primary" disabled={!pw.current || pw.next.length < 8} onClick={changePassword}>
-            <KeyRound size={16} /> Change password
+            <KeyRound size={16} /> {t("adm_change_password")}
           </button>
         </Card>
-        <Card title="Mirror">
-          <p>Check GitHub for new EVE-OS releases now (normally this happens once a day).</p>
-          <button className="btn" onClick={() => api.action("sync").then(() => toast("The check runs in the background."))
+        <Card title={t("adm_mirror_card")}>
+          <p>{t("adm_sync_text")}</p>
+          <button className="btn" onClick={() => api.action("sync").then(() => toast(t("adm_sync_started")))
             .catch((e) => toast(errorText(e), "err"))}>
-            <RefreshCw size={16} /> Check GitHub now
+            <RefreshCw size={16} /> {t("adm_sync_now")}
           </button>
         </Card>
-        <Card title="Diagnostics">
-          <p>One file with logs, status, network and disk information and the settings (without passwords or tokens),
-            for troubleshooting.</p>
-          <a className="btn" href="api/diagnostics" download><Download size={16} /> Download diagnostics</a>
+        <Card title={t("adm_diagnostics")}>
+          <p>{t("adm_diagnostics_text")}</p>
+          <a className="btn" href="api/diagnostics" download><Download size={16} /> {t("adm_diagnostics_download")}</a>
         </Card>
-        <Card title="Power">
-          <p>Restart or shut down this VM.</p>
+        <Card title={t("adm_power")}>
+          <p>{t("adm_power_text")}</p>
           <div className="form-actions">
-            <button className="btn" onClick={() => setAsk("reboot")}><RotateCcw size={16} /> Reboot</button>
-            <button className="btn danger" onClick={() => setAsk("poweroff")}><Power size={16} /> Power off</button>
+            <button className="btn" onClick={() => setAsk("reboot")}><RotateCcw size={16} /> {t("adm_reboot")}</button>
+            <button className="btn danger" onClick={() => setAsk("poweroff")}><Power size={16} /> {t("adm_poweroff")}</button>
           </div>
         </Card>
       </div>
       {ask && (
-        <Confirm title={ask === "reboot" ? "Reboot" : "Power off"} danger={ask === "poweroff"}
-          text={ask === "reboot" ? "Reboot this VM now? The page comes back after about a minute."
-            : "Power off this VM now? Machines can no longer network boot from it until it is started again."}
-          confirm={ask === "reboot" ? "Reboot" : "Power off"}
-          onConfirm={() => api.action(ask).then(() => toast(ask === "reboot" ? "Rebooting ..." : "Powering off ..."))
+        <Confirm title={ask === "reboot" ? t("adm_reboot") : t("adm_poweroff")} danger={ask === "poweroff"}
+          text={ask === "reboot" ? t("adm_reboot_web_q") : t("adm_poweroff_q")}
+          confirm={ask === "reboot" ? t("adm_reboot") : t("adm_poweroff")}
+          onConfirm={() => api.action(ask).then(() => toast(ask === "reboot" ? t("adm_rebooting") : t("adm_powering_off")))
             .catch((e) => toast(errorText(e), "err"))}
           onClose={() => setAsk("")} />
       )}

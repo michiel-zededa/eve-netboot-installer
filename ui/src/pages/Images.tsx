@@ -34,8 +34,8 @@ export default function Images({ status, activity, tab, search, onSearch, admin,
   const doUpload = async (file: File, replace = false) => {
     setUpload({ name: file.name, pct: 0 });
     try {
-      await uploadIso(file, replace, (pct) => setUpload({ name: file.name, pct }));
-      toast(`${file.name} uploaded; it appears in the list within a minute.`);
+      await uploadIso(file, replace, (pct) => setUpload({ name: file.name, pct }), t("adm_api_interrupted"));
+      toast(t("adm_uploaded", { file: file.name }));
       onChanged?.();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setOverwrite(file);
@@ -80,7 +80,7 @@ export default function Images({ status, activity, tab, search, onSearch, admin,
   }, [entries, tab, arch, variant, search, sort]);
 
   const current = entries.find((e) => e.path === selected) ?? null;
-  const title = tab === "github" ? t("ui_nav_github") : tab === "local" ? t("ui_nav_local") : t("ui_nav_all");
+  const title = t("ui_section_images");
   const folder = status?.config.import_label || t("import_folder");
 
   const Th = ({ k, label }: { k: SortKey; label: string }) => (
@@ -100,20 +100,20 @@ export default function Images({ status, activity, tab, search, onSearch, admin,
             <input ref={fileRef} type="file" accept=".iso" hidden
               onChange={(e) => e.target.files?.[0] && doUpload(e.target.files[0])} />
             <button className="btn primary slim" disabled={!!upload} onClick={() => fileRef.current?.click()}>
-              <Upload size={16} /> Upload ISO
+              <Upload size={16} /> {t("adm_upload_iso")}
             </button>
           </>
         )}
       </PageHeader>
       {upload && (
         <div className="notice upload">
-          <span>Uploading <b>{upload.name}</b> ({upload.pct}%)</span>
+          <span>{t("adm_uploading", { file: upload.name, pct: upload.pct })}</span>
           <div className="progress"><span style={{ width: `${upload.pct}%` }} /></div>
         </div>
       )}
       {overwrite && (
-        <Confirm title="File exists" text={<>{overwrite.name} is already in the import folder. Replace it?</>}
-          confirm="Replace" onConfirm={() => doUpload(overwrite, true)} onClose={() => setOverwrite(null)} />
+        <Confirm title={t("adm_file_exists")} text={t("adm_file_exists_q", { file: overwrite.name })}
+          confirm={t("adm_replace")} onConfirm={() => doUpload(overwrite, true)} onClose={() => setOverwrite(null)} />
       )}
 
       <div className="tabs" role="tablist">
@@ -214,7 +214,7 @@ function ImageDetail({ entry: e, admin, onClose, onDeleted }: {
   const toast = useToast();
   const [ask, setAsk] = useState(false);
   const remove = () => api.deleteImage(e.file ?? "")
-    .then(() => { toast(`${e.file} deleted; it disappears from the menu within a minute.`); onDeleted(); })
+    .then(() => { toast(t("adm_deleted", { file: e.file ?? "" })); onDeleted(); })
     .catch((err) => toast(errorText(err), "err"));
   const yesNo = (v?: boolean | null) => (v === undefined || v === null ? "" : v ? t("ui_yes") : t("ui_no"));
   return (
@@ -245,12 +245,12 @@ function ImageDetail({ entry: e, admin, onClose, onDeleted }: {
           </a>
         )}
         {admin && e.source === "local" && e.file && (
-          <button className="btn danger" onClick={() => setAsk(true)}><Trash2 size={16} /> Delete from the import folder</button>
+          <button className="btn danger" onClick={() => setAsk(true)}><Trash2 size={16} /> {t("adm_delete_iso")}</button>
         )}
       </div>
       {ask && (
-        <Confirm title="Delete ISO" danger confirm="Delete" onConfirm={remove} onClose={() => setAsk(false)}
-          text={<>Delete <b>{e.file}</b> from the import folder? It is removed from the boot menu.</>} />
+        <Confirm title={t("adm_delete_iso_title")} danger confirm={t("adm_delete")} onConfirm={remove}
+          onClose={() => setAsk(false)} text={t("adm_delete_iso_q", { file: e.file ?? "" })} />
       )}
     </Drawer>
   );

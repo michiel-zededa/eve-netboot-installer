@@ -8,6 +8,7 @@ export interface Session {
   configured: boolean;
   authenticated: boolean;
   web_admin: boolean;
+  language: string;
   job: Job | null;
   rollback?: { seconds_left: number };
 }
@@ -42,9 +43,16 @@ export class ApiError extends Error {
   }
 }
 
+// the language of the page: messages of the API come back in it
+let language = "";
+export function setApiLanguage(lang: string) {
+  language = lang;
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (method !== "GET") headers["X-ENI"] = "1";
+  if (language) headers["X-ENI-Lang"] = language;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const r = await fetch(path, {
     method,
@@ -75,6 +83,8 @@ export const api = {
   login: (password: string) => call<{ ok: true }>("POST", "api/login", { password }),
   logout: () => call<{ ok: true }>("POST", "api/logout", {}),
   settings: () => call<SettingsInfo>("GET", "api/settings"),
+  texts: (lang?: string) =>
+    call<{ language: string; texts: Record<string, string> }>("GET", `api/texts${lang ? `?lang=${lang}` : ""}`),
   save: (settings: Record<string, string | null>, secrets: Record<string, string> = {}) =>
     call<SaveResult>("POST", "api/settings", { settings, secrets }),
   setup: (settings: Record<string, string | null>, secrets: Record<string, string>) =>
@@ -108,11 +118,13 @@ export async function waitJob(id: string, onMessage?: (msgs: string[]) => void):
 }
 
 /** Upload an ISO into the import folder, with progress (0..100). */
-export function uploadIso(file: File, overwrite: boolean, onProgress: (pct: number) => void): Promise<void> {
+export function uploadIso(file: File, overwrite: boolean, onProgress: (pct: number) => void,
+  interrupted: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `api/upload?name=${encodeURIComponent(file.name)}${overwrite ? "&overwrite=1" : ""}`);
     xhr.setRequestHeader("X-ENI", "1");
+    if (language) xhr.setRequestHeader("X-ENI-Lang", language);
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
     xhr.onload = () => {
       if (xhr.status === 200) return resolve();
@@ -124,7 +136,7 @@ export function uploadIso(file: File, overwrite: boolean, onProgress: (pct: numb
       }
       reject(new ApiError(xhr.status, msg));
     };
-    xhr.onerror = () => reject(new ApiError(0, "The upload was interrupted."));
+    xhr.onerror = () => reject(new ApiError(0, interrupted));
     xhr.send(file);
   });
 }

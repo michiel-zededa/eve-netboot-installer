@@ -1,9 +1,9 @@
 #!ipxe
-# Embedded in the EVE-Netboot-Installer iPXE binaries (built into the image).
+# Embedded in the EVE Netboot Installer iPXE binaries (built into the image).
 # Deliberately generic: everything site specific lives in boot.ipxe, which
 # eve-sync generates and the TFTP service serves next to this binary.
 echo
-echo EVE-Netboot-Installer (iPXE ${version}, ${buildarch})
+echo EVE Netboot Installer (iPXE ${version}, ${buildarch})
 dhcp || dhcp || goto failed
 isset ${next-server} || goto failed
 chain --autofree tftp://${next-server}/boot.ipxe || goto failed

@@ -16,7 +16,7 @@ APT_OPTS="-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 # ---- packages: the newest Debian updates plus what the appliance needs
 # Docker comes from Debian itself (docker.io, docker-compose): within a Debian
 # release it only gets fixes, so "apt upgrade" cannot jump to a new major version.
-PACKAGES="docker.io docker-cli docker-compose apparmor whiptail nano less curl ca-certificates openssl
+PACKAGES="docker.io docker-cli docker-compose apparmor whiptail console-setup nano less curl ca-certificates openssl
   samba qemu-guest-agent unattended-upgrades cloud-guest-utils
   systemd-resolved openssh-server sudo python3 python3-yaml"
 ARCH=$(dpkg --print-architecture)
@@ -58,15 +58,30 @@ if [ -f "$PAYLOAD/image.tar.gz" ]; then
 else
   docker pull "$IMAGE"
 fi
-# the web UI also on the VM itself: the web setup needs it before the stack runs
+# the web UI and the translations also on the VM itself: the web setup and the
+# console need them before the stack runs
 install -d -m 0755 /usr/local/lib/eve-netboot
 cid=$(docker create "$IMAGE")
-if docker cp "$cid:/app/ui" /usr/local/lib/eve-netboot/ui; then
-  chown -R root:root /usr/local/lib/eve-netboot/ui
-else
-  echo "the image has no web UI (/app/ui)"
-fi
+for d in ui i18n; do
+  if docker cp "$cid:/app/$d" "/usr/local/lib/eve-netboot/$d"; then
+    chown -R root:root "/usr/local/lib/eve-netboot/$d"
+  else
+    echo "the image has no /app/$d"
+  fi
+done
 docker rm "$cid" >/dev/null
+
+# ---- console font: box drawing and the letters of all menu languages (the
+# kernel's built-in font lacks e.g. a-tilde and o-slash), in the classic VGA look
+cat > /etc/default/console-setup <<'CONSOLE'
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="Uni2"
+FONTFACE="VGA"
+FONTSIZE="8x16"
+VIDEOMODE=
+CONSOLE
+setupcon --save-only 2>/dev/null || true
 
 # ---- appliance files
 # owned by root; existing directories (/etc, /usr, ...) keep their owner and mode
@@ -87,7 +102,7 @@ date -u +%Y-%m-%d > /usr/local/lib/eve-netboot/BUILD_DATE
 
 # ---- the admin user (no password until the setup sets one); no other users
 if id debian >/dev/null 2>&1; then userdel -r debian; fi
-id admin >/dev/null 2>&1 || useradd -m -s /bin/bash -c "EVE-Netboot-Installer admin" -G adm,sudo admin
+id admin >/dev/null 2>&1 || useradd -m -s /bin/bash -c "EVE Netboot Installer admin" -G adm,sudo admin
 passwd -l admin
 chown admin:admin /srv/eve-netboot/import
 

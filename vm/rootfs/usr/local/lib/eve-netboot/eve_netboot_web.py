@@ -1,5 +1,5 @@
 """
-eve-netboot web -- HTTPS management UI of the EVE-Netboot-Installer appliance
+eve-netboot web -- HTTPS management UI of the EVE Netboot Installer appliance
 ============================================================================
 
 Serves the same web UI as the PXE server's port 8080 (from /srv/eve-netboot/www)
@@ -25,6 +25,7 @@ that changes the system goes through its functions, exactly like the console.
 """
 
 import datetime
+import html
 import http.server
 import io
 import json
@@ -115,7 +116,7 @@ class App:
     def check_lockout(self, ip):
         count, until = self.failures.get(ip, (0, 0))
         if until > time.time():
-            raise HttpError(429, f"Too many wrong passwords. Try again in {int(until - time.time()) + 1} s.")
+            raise HttpError(429, self.core.tr("adm_api_locked", seconds=int(until - time.time()) + 1))
 
     def login_failed(self, ip):
         count, _ = self.failures.get(ip, (0, 0))
@@ -126,12 +127,14 @@ class App:
     def start_job(self, kind, fn):
         with self.lock:
             if self.job and self.job.state == "running":
-                raise HttpError(409, f"Another task is still running ({self.job.kind}).")
+                raise HttpError(409, self.core.tr("adm_api_busy", task=self.job.kind))
             job = Job(kind)
             self.job = job
             self.jobs[job.id] = job
+        language = self.core.thread_language()   # the job answers in the language of its request
 
         def run():
+            self.core.use_language(language)
             try:
                 job.result = fn(job)
                 job.state = "done"
@@ -226,12 +229,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def read_body(self, size):
+        """Read up to size bytes of the request body; keeps track of what is left."""
+        data = self.rfile.read(min(size, self.body_left))
+        self.body_left -= len(data)
+        return data
+
+    def drain_body(self):
+        """Read whatever the client sent and nobody read. A connection closed
+        with unread data gets a TCP reset, which makes the browser drop the
+        response just sent ("Failed to fetch") instead of showing it."""
+        try:
+            while self.body_left > 0 and self.read_body(1 << 20):
+                pass
+        except OSError:
+            pass
+
     def json_body(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > MAX_JSON:
+        if self.body_left > MAX_JSON:
             raise HttpError(413, "Request too large.")
         try:
-            data = json.loads(self.rfile.read(length) or b"{}")
+            data = json.loads(self.read_body(self.body_left) or b"{}")
         except ValueError:
             raise HttpError(400, "Invalid JSON.") from None
         if not isinstance(data, dict):
@@ -243,6 +261,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return url.path, urllib.parse.parse_qs(url.query)
 
     def handle_safely(self, fn):
+        self.core.use_language(self.headers.get("X-ENI-Lang"))
+        try:
+            self.body_left = max(0, int(self.headers.get("Content-Length") or 0))
+        except ValueError:
+            self.body_left = 0
         try:
             fn()
         except HttpError as e:
@@ -253,6 +276,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.core.log(f"web: {self.command} {self.path}: {e}")
             traceback.print_exc()
             self.send(500, {"error": f"Internal error: {e}"})
+        finally:
+            self.drain_body()
 
     # ---- HTTP methods
     def do_GET(self):
@@ -274,6 +299,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.static(path)
         if path == "/api/session":
             return self.send(200, self.session_info())
+        if path == "/api/texts":
+            return self.send(200, self.texts(query.get("lang", [""])[0]))
         if path.startswith("/api/jobs/"):
             self.require_auth_or_setup()
             job = self.app.jobs.get(path.rsplit("/", 1)[-1])
@@ -309,6 +336,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not (candidate == root or candidate.startswith(root + os.sep)):
                 raise HttpError(404, "Not found.")
             if os.path.isdir(candidate):
+                if not os.path.isfile(os.path.join(candidate, "index.html")) and base == self.core.WWW:
+                    return self.listing(path, candidate)
                 candidate = os.path.join(candidate, "index.html")
             if os.path.isfile(candidate):
                 full = candidate
@@ -330,6 +359,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(full, "rb") as f:
                 shutil.copyfileobj(f, self.wfile, 1 << 20)
 
+    def listing(self, path, folder):
+        """A folder of the web root as a page of links, like nginx autoindex on
+        the PXE server's port: "Open the files" and "All files" point here."""
+        if not path.endswith("/"):
+            return self.send(301, b"", "text/plain", {"Location": urllib.parse.quote(path) + "/"})
+        rows = []
+        for name in sorted(os.listdir(folder), key=str.lower):
+            full = os.path.join(folder, name)
+            if name.startswith(".") or not (os.path.isdir(full) or os.path.isfile(full)):
+                continue
+            st = os.stat(full)
+            is_dir = os.path.isdir(full)
+            link = urllib.parse.quote(name) + ("/" if is_dir else "")
+            size = "-" if is_dir else f"{st.st_size:,}"
+            when = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+            rows.append(f'<tr><td><a href="{html.escape(link)}">{html.escape(name)}{"/" if is_dir else ""}</a></td>'
+                        f"<td>{when}</td><td class=n>{size}</td></tr>")
+        title = html.escape(urllib.parse.unquote(path))
+        page = (f"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+                f"<title>{title}</title><style>body{{font:14px system-ui,sans-serif;margin:24px;color:#222}}"
+                "table{border-collapse:collapse}td{padding:3px 18px 3px 0}td.n{text-align:right}"
+                "a{color:#5b3fd1;text-decoration:none}a:hover{text-decoration:underline}"
+                "@media(prefers-color-scheme:dark){body{background:#16161d;color:#ddd}a{color:#a99bff}}</style>"
+                f"</head><body><h1>{title}</h1><table><tr><td><a href=\"../\">../</a></td><td></td><td></td></tr>"
+                + "".join(rows) + "</table></body></html>")
+        self.send(200, page, "text/html; charset=utf-8")
+
     # ---- POST / DELETE
     def change(self, method):
         if self.headers.get("X-ENI") != "1":
@@ -345,7 +401,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "POST" and path == "/api/network/confirm":
             ok = self.app.confirm_rollback(self.json_body().get("token"))
             if not ok:
-                raise HttpError(400, "Nothing to confirm (the time may have run out).")
+                raise HttpError(400, self.core.tr("adm_api_nothing_to_confirm"))
             return self.send(200, {"ok": True})
         if method == "POST" and path == "/api/import":
             self.require_auth_or_setup()     # the web setup can start from an export
@@ -365,11 +421,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def require_auth(self):
         if not self.authenticated():
-            raise HttpError(401, "Please log in.")
+            raise HttpError(401, self.core.tr("adm_api_login"))
 
     def require_auth_or_setup(self):
         if not self.authenticated() and self.core.is_configured():
-            raise HttpError(401, "Please log in.")
+            raise HttpError(401, self.core.tr("adm_api_login"))
 
     def cookie_header(self, value, max_age):
         return f"eni_session={value}; Path=/; Max-Age={max_age}; HttpOnly; Secure; SameSite=Strict"
@@ -385,12 +441,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "configured": c.is_configured(),
             "authenticated": self.authenticated(),
             "web_admin": c.get(s, "WEB_ADMIN") == "yes",
+            "language": c.get(s, "ENI_LANGUAGE"),
             "job": self.app.job.as_dict() if self.app.job and self.app.job.state == "running" else None,
         }
         rb = self.app.rollback
         if rb and info["authenticated"]:
             info["rollback"] = {"seconds_left": max(0, int(rb["deadline"] - time.time()))}
         return info
+
+    def texts(self, lang):
+        """Texts of the web UI in a language (default: the saved one). Also before
+        the setup: the web setup shows its questions in the chosen language."""
+        c = self.core
+        if lang not in dict(c.LANGUAGES):
+            lang = c.get(c.load_settings(), "ENI_LANGUAGE")
+        out = dict(c.texts(lang))
+        # the stack's own copy is the newest (an app update brings new texts)
+        try:
+            ui = json.loads(c.read(os.path.join(c.WWW, "eve", "ui.json")) or "{}")
+            if ui.get("language") == lang:
+                out.update(ui.get("texts") or {})
+        except ValueError:
+            pass
+        return {"language": lang, "texts": out}
 
     def login(self):
         ip = self.client_ip()
@@ -400,7 +473,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.app.login_failed(ip)
             time.sleep(1)
             self.core.log(f"web: wrong admin password from {ip}")
-            raise HttpError(401, "Wrong password.")
+            raise HttpError(401, self.core.tr("adm_wrong_password"))
         self.app.failures.pop(ip, None)
         token = self.app.new_session()
         self.core.log(f"web: admin logged in from {ip}")
@@ -452,7 +525,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 s[k] = str(v)
         for k in ("ADMIN_PASSWORD", "SMB_PASSWORD"):
             if k in s and len(s[k]) < 8:
-                raise HttpError(400, "Passwords need at least 8 characters.")
+                raise HttpError(400, self.core.tr("adm_pw_too_short", n=8))
         errors = self.core.validate(s)
         if errors:
             raise HttpError(400, "; ".join(errors))
@@ -461,14 +534,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def api_setup(self):
         c = self.core
         if c.is_configured():
-            raise HttpError(409, "This VM is already set up. Please log in.")
+            raise HttpError(409, self.core.tr("adm_api_already_set_up"))
         body = self.json_body()
         s = self.new_settings(body, c.load_settings())
         if not s.get("ADMIN_PASSWORD"):
-            raise HttpError(400, "Choose an admin password.")
+            raise HttpError(400, self.core.tr("adm_api_choose_password"))
         s["WEB_ADMIN"] = "yes"          # set up in the browser: keep the browser
         c.log(f"web: setup from {self.client_ip()}")
-        job = self.app.start_job("setup", lambda j: (j.say("Applying the settings ..."), c.apply(s), "ok")[-1])
+        job = self.app.start_job("setup", lambda j: (j.say(c.tr("adm_applying")), c.apply(s), "ok")[-1])
         token = self.app.new_session()
         self.send(200, {"job": job.id}, headers={"Set-Cookie": self.cookie_header(token, SESSION_MAX)})
 
@@ -490,7 +563,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         changed = sorted(k for k in set(s) | set(previous)
                          if s.get(k) != previous.get(k) and k not in SECRET_KEYS)
         c.log(f"web: settings changed from {self.client_ip()}: {', '.join(changed) or '-'}")
-        job = self.app.start_job("settings", lambda j: (j.say("Applying the settings ..."), c.apply(s), "ok")[-1])
+        job = self.app.start_job("settings", lambda j: (j.say(c.tr("adm_applying")), c.apply(s), "ok")[-1])
         result["job"] = job.id
         self.send(200, result)
 
@@ -500,9 +573,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             found = self.core.fetch_import(str(body.get("url") or "")) if body.get("url") else \
                 self.core.parse_env(str(body.get("text") or ""))
         except Exception as e:  # noqa: BLE001
-            raise HttpError(400, f"Could not import the settings: {e}") from None
+            raise HttpError(400, self.core.tr("adm_imp_failed", error=e)) from None
         if not found:
-            raise HttpError(400, "No settings found.")
+            raise HttpError(400, self.core.tr("adm_imp_none"))
         merged = self.core.merge(self.core.load_settings(), found)
         self.send(200, {"settings": {k: v for k, v in merged.items() if k not in SECRET_KEYS}})
 
@@ -510,10 +583,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.json_body()
         if not self.core.check_password(self.core.ADMIN, str(body.get("current") or "")):
             time.sleep(1)
-            raise HttpError(400, "The current password is not correct.")
+            raise HttpError(400, self.core.tr("adm_api_current_password"))
         new = str(body.get("new") or "")
         if len(new) < 8:
-            raise HttpError(400, "The new password needs at least 8 characters.")
+            raise HttpError(400, self.core.tr("adm_pw_too_short", n=8))
         self.core.run(["chpasswd"], input=f"{self.core.ADMIN}:{new}\n")
         self.core.log(f"web: admin password changed from {self.client_ip()}")
         self.send(200, {"ok": True})
@@ -521,7 +594,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def action(self, name):
         c = self.core
         if name == "sync":
-            c.compose("restart", "sync", check=False)
+            # restarting the sync role checks GitHub and the import folder at
+            # once; it takes a while, so do not keep the browser waiting for it
+            c.log(f"web: check now from {self.client_ip()}")
+            threading.Thread(target=c.compose, args=("restart", "sync"), kwargs={"check": False},
+                             daemon=True).start()
             return self.send(200, {"ok": True})
         if name == "update-system":
             job = self.app.start_job("update-system", lambda j: dict(zip(("ok", "reboot", "message"),
@@ -556,27 +633,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Stream an installer ISO into the import folder."""
         c = self.core
         if not UPLOAD_NAME.match(name):
-            raise HttpError(400, "Use a file name ending in .iso (letters, digits, . _ -).")
-        length = int(self.headers.get("Content-Length") or 0)
+            raise HttpError(400, c.tr("adm_api_upload_name"))
+        length = self.body_left
         if length <= 0:
             raise HttpError(411, "The upload needs a Content-Length.")
         if length > shutil.disk_usage(c.IMPORT).free - (1 << 30):
-            raise HttpError(507, "Not enough free disk space for this file.")
+            raise HttpError(507, c.tr("adm_api_disk_full"))
         dest = os.path.join(c.IMPORT, name)
         if os.path.exists(dest) and not overwrite:
-            raise HttpError(409, f"{name} already exists.")
+            raise HttpError(409, c.tr("adm_api_exists", file=name))
         part = os.path.join(c.IMPORT, f".upload-{secrets.token_hex(4)}.part")
         try:
             with open(part, "wb") as f:
                 left = length
                 while left:
-                    chunk = self.rfile.read(min(left, 1 << 20))
+                    chunk = self.read_body(min(left, 1 << 20))
                     if not chunk:
-                        raise HttpError(400, "The upload was interrupted.")
+                        raise HttpError(400, c.tr("adm_api_interrupted"))
                     f.write(chunk)
                     left -= len(chunk)
             if not c.is_eve_iso(part):
-                raise HttpError(400, "This is not an EVE-OS installer ISO (volume id EVEISO).")
+                raise HttpError(400, c.tr("adm_api_not_eve_iso"))
             shutil.chown(part, c.ADMIN, c.ADMIN)
             os.chmod(part, 0o644)
             os.replace(part, dest)
@@ -591,9 +668,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         root = os.path.realpath(c.IMPORT)
         full = os.path.realpath(os.path.join(root, rel))
         if not rel or not full.startswith(root + os.sep) or not os.path.isfile(full):
-            raise HttpError(404, "No such file in the import folder.")
+            raise HttpError(404, c.tr("adm_api_no_such_file"))
         if not full.lower().endswith((".iso", "installer-net.tar")):
-            raise HttpError(400, "Only installer ISOs can be deleted here.")
+            raise HttpError(400, c.tr("adm_api_only_isos"))
         os.remove(full)
         c.log(f"web: deleted {rel} from the import folder ({self.client_ip()})")
         self.send(200, {"ok": True})
@@ -672,7 +749,7 @@ def ensure_certificate(core):
     san = f"DNS:{host}" + (f",IP:{ip}" if ip else "")
     subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
                     "-sha256", "-days", str(CERT_DAYS), "-nodes", "-keyout", key + ".new", "-out", cert + ".new",
-                    "-subj", f"/CN={host}/O=EVE-Netboot-Installer",
+                    "-subj", f"/CN={host}/O=EVE Netboot Installer",
                     "-addext", f"subjectAltName={san}",
                     "-addext", "basicConstraints=critical,CA:FALSE",
                     "-addext", "keyUsage=critical,digitalSignature",
