@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVE-Netboot-Installer</title>
+<link rel="icon" href="./ui/favicon.svg" type="image/svg+xml">
+<script>
+  // apply the theme before the first paint: light | dark | system
+  try { document.documentElement.dataset.theme = localStorage.getItem("eni-theme") || "system"; }
+  catch (e) { document.documentElement.dataset.theme = "system"; }
+</script>
+</head>
+<body>
+<div id="root"></div>
+<noscript>This page needs JavaScript. The data is also in <a href="eve/status.json">eve/status.json</a>;
+all files are under <a href="eve/">eve/</a>.</noscript>
+<script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

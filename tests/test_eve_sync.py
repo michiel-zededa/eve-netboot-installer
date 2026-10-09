@@ -214,6 +214,68 @@ class StopLoop(Exception):
     """Ends main() after a number of cycles (unlike SystemExit, which main() raises itself)."""
 
 
+class WebUiTest(unittest.TestCase):
+
+    def setUp(self):
+        shutil.rmtree(eve_sync.ASSETS, ignore_errors=True)
+        os.makedirs(eve_sync.REL_ROOT)
+        self.ui = tempfile.mkdtemp(dir=TMP)
+        os.makedirs(os.path.join(self.ui, "ui", "assets"))
+        for rel, text in (("index.html", "<html>v1</html>"), ("ui/assets/app-1.js", "v1"),
+                          ("ui/zededa-logo.svg", "<svg/>")):
+            with open(os.path.join(self.ui, rel), "w") as f:
+                f.write(text)
+        patch = mock.patch.multiple(eve_sync, UI_DIR=self.ui, log=mock.DEFAULT)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def read_asset(self, rel):
+        with open(os.path.join(eve_sync.ASSETS, rel)) as f:
+            return f.read()
+
+    def test_ui_is_installed_and_old_versions_removed(self):
+        self.assertTrue(eve_sync.install_ui())
+        self.assertEqual(self.read_asset("index.html"), "<html>v1</html>")
+        self.assertEqual(self.read_asset("ui/assets/app-1.js"), "v1")
+        # a new UI version with another hashed file name
+        os.remove(os.path.join(self.ui, "ui", "assets", "app-1.js"))
+        with open(os.path.join(self.ui, "ui", "assets", "app-2.js"), "w") as f:
+            f.write("v2")
+        eve_sync.install_ui()
+        self.assertFalse(os.path.exists(os.path.join(eve_sync.ASSETS, "ui", "assets", "app-1.js")))
+        self.assertEqual(self.read_asset("ui/assets/app-2.js"), "v2")
+        # the mirror itself is never touched
+        self.assertTrue(os.path.isdir(eve_sync.REL_ROOT))
+
+    def test_without_built_ui_the_simple_page_is_written(self):
+        with mock.patch.object(eve_sync, "UI_DIR", os.path.join(TMP, "no-ui")):
+            eve_sync.write_menus()
+        self.assertIn("EVE-Netboot-Installer", self.read_asset("index.html"))
+
+    def test_status_and_texts_for_the_ui(self):
+        eve_sync.write_menus()
+        with open(os.path.join(eve_sync.EVE_ROOT, "status.json")) as f:
+            status = json.load(f)
+        for key in ("menu_timeout", "defaults", "version", "admin_url", "import_label"):
+            self.assertIn(key, status["config"])
+        with open(os.path.join(eve_sync.EVE_ROOT, "ui.json"), encoding="utf-8") as f:
+            ui = json.load(f)
+        self.assertEqual(ui["language"], eve_sync.LANGUAGE)
+        self.assertIn("ui_nav_home", ui["texts"])
+        self.assertEqual(set(eve_sync.STATUS_FIELDS) >= {"args", "config_img", "published", "mtime"}, True)
+
+    def test_activity(self):
+        eve_sync.write_activity("downloading", "17.0.0-lts amd64.kvm", 50 << 20, 200 << 20)
+        with open(os.path.join(eve_sync.EVE_ROOT, "activity.json")) as f:
+            a = json.load(f)
+        self.assertEqual((a["state"], a["item"], a["done_mb"], a["total_mb"], a["percent"]),
+                         ("downloading", "17.0.0-lts amd64.kvm", 50, 200, 25))
+        self.assertIn("free_gb", a["disk"])
+        eve_sync.write_activity()
+        with open(os.path.join(eve_sync.EVE_ROOT, "activity.json")) as f:
+            self.assertEqual(json.load(f)["state"], "idle")
+
+
 class MainLoopTest(unittest.TestCase):
 
     def run_loop(self, interval, cycles=3):
@@ -223,7 +285,8 @@ class MainLoopTest(unittest.TestCase):
             sleeps.append(1)
             if len(sleeps) >= cycles:
                 raise StopLoop
-        with mock.patch.multiple(eve_sync, SYNC_INTERVAL=interval, sync_local=mock.DEFAULT,
+        local = mock.Mock(return_value=False)   # the import folder has nothing new
+        with mock.patch.multiple(eve_sync, SYNC_INTERVAL=interval, sync_local=local,
                                  sync_github=mock.DEFAULT, write_menus=mock.DEFAULT,
                                  log=mock.DEFAULT) as m, \
                 mock.patch.object(eve_sync.time, "sleep", sleep), \
@@ -231,6 +294,7 @@ class MainLoopTest(unittest.TestCase):
                 mock.patch.object(sys, "argv", ["eve_sync.py"]):
             with self.assertRaises(StopLoop):
                 eve_sync.main()
+        m["sync_local"] = local
         return m
 
     def test_interval_zero_keeps_watching_imports(self):
@@ -242,7 +306,8 @@ class MainLoopTest(unittest.TestCase):
     def test_interval(self):
         m = self.run_loop(86400)
         self.assertEqual(m["sync_github"].call_count, 1)
-        self.assertEqual(m["write_menus"].call_count, 3)
+        # once right at start (before any download), then once per cycle
+        self.assertEqual(m["write_menus"].call_count, 1 + 3)
 
 
 class GithubSelectionTest(unittest.TestCase):

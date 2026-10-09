@@ -86,6 +86,11 @@ IMPORT_DIR = _env("ENI_IMPORT", "/import")
 TFTP_DIR = _env("ENI_TFTP_DIR", "/tftp")
 IMPORT_LABEL = _env("ENI_IMPORT_LABEL", "")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# the built web UI (ui/ in the repository, built into the image as /app/ui)
+UI_DIR = _env("ENI_UI_DIR", os.path.join(APP_DIR, "ui"))
+VERSION = _env("ENI_VERSION", "dev")
+# management UI of the VM appliance, shown as a link in the web UI (empty = none)
+ADMIN_URL = _env("ENI_ADMIN_URL")
 BASE_URL = _env("ENI_BASE_URL").rstrip("/")
 ARCHES = _env("EVE_ARCHES", "amd64").split()
 FLAVOURS = _env("EVE_FLAVOURS", "kvm").split()
@@ -199,7 +204,7 @@ def http_text(url):
         return r.read().decode("utf-8", "replace")
 
 
-def download(url, dest, expected_sha=None, retries=3):
+def download(url, dest, expected_sha=None, retries=3, item=""):
     """Stream url to dest, verifying sha256. Atomic via .part file."""
     part = dest + ".part"
     for attempt in range(1, retries + 1):
@@ -208,6 +213,7 @@ def download(url, dest, expected_sha=None, retries=3):
             done, last = 0, time.time()
             with http_get(url) as r, open(part, "wb") as f:
                 total = int(r.headers.get("Content-Length") or 0)
+                shown = 0.0
                 while True:
                     chunk = r.read(1 << 20)
                     if not chunk:
@@ -215,6 +221,9 @@ def download(url, dest, expected_sha=None, retries=3):
                     f.write(chunk)
                     h.update(chunk)
                     done += len(chunk)
+                    if item and time.time() - shown > 5:
+                        write_activity("downloading", item, done, total)
+                        shown = time.time()
                     if time.time() - last > 15:
                         pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
                         log(f"    ... {pct}")
@@ -503,7 +512,7 @@ def sync_github():
                 log(f"  {tag} {variant}: downloading {asset['size'] >> 20} MB ...")
                 os.makedirs(os.path.join(REL_ROOT, tag), exist_ok=True)
                 part = os.path.join(REL_ROOT, tag, f".{iso_name}")
-                digest = download(asset["browser_download_url"], part, expected)
+                digest = download(asset["browser_download_url"], part, expected, item=f"{tag} {variant}")
                 log(f"  {tag} {variant}: sha256 {'verified' if expected else 'computed'} {digest[:16]}...")
                 prepare_dir(part, dest, arch, flav, {
                     "source": "github", "tag": tag, "asset": iso_name, "asset_id": asset["id"],
@@ -511,6 +520,7 @@ def sync_github():
                     "published": rel.get("published_at", "")[:10], "variant": flav,
                 }, move=True)
                 log(f"  {tag} {variant}: ready")
+                write_menus()   # each release is offered as soon as it is ready
     # prune releases/variants that are no longer wanted
     for tag in os.listdir(REL_ROOT):
         tdir = os.path.join(REL_ROOT, tag)
@@ -580,6 +590,7 @@ def sync_local():
             log(f"Local: {rel} is still being written - later")
             continue
         log(f"Local: importing {rel} ({st.st_size >> 20} MB)")
+        write_activity("importing", rel)
         try:
             src = full
             if rel.lower().endswith(".tar"):
@@ -604,6 +615,7 @@ def sync_local():
             log(f"Local: {rel} ready ({m['arch']}, variant={variant or '?'}, netboot_ok={m['netboot_ok']})")
         except Exception as e:  # noqa: BLE001
             log(f"Local: {rel} FAILED: {e}")
+            rmtree(dest + ".tmp")
             rmtree(dest)
             os.makedirs(dest, exist_ok=True)
             with open(os.path.join(dest, "meta.json"), "w") as f:
@@ -1035,6 +1047,70 @@ def write_boot_ipxe():
         write_if_changed(os.path.join(TFTP_DIR, "boot.ipxe"), fill(BOOT_IPXE, {"base": BASE_URL}))
 
 
+STATUS_FIELDS = ("path", "source", "tag", "file", "name", "arch", "variant", "flavour", "iso_size",
+                 "sha256", "sha256_verified", "netboot_ok", "error", "published", "mtime", "prepared",
+                 "ucode", "config_img", "args", "console", "label")
+
+
+def install_ui():
+    """Copy the built web UI into the web root: index.html + ui/. Files of an
+    older UI version (hashed names) are removed. False when there is no UI."""
+    index = os.path.join(UI_DIR, "index.html")
+    if not os.path.isfile(index):
+        return False
+    wanted = set()
+    for root, _dirs, files in os.walk(UI_DIR):
+        for name in files:
+            src = os.path.join(root, name)
+            rel = os.path.relpath(src, UI_DIR)
+            wanted.add(rel)
+            dest = os.path.join(ASSETS, rel)
+            with open(src, "rb") as f:
+                data = f.read()
+            try:
+                with open(dest, "rb") as f:
+                    if f.read() == data:
+                        continue
+            except FileNotFoundError:
+                pass
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest + ".tmp", "wb") as f:
+                f.write(data)
+            os.chmod(dest + ".tmp", 0o644)
+            os.replace(dest + ".tmp", dest)
+    ui_root = os.path.join(ASSETS, "ui")
+    for root, _dirs, files in os.walk(ui_root):
+        for name in files:
+            path = os.path.join(root, name)
+            if os.path.relpath(path, ASSETS) not in wanted:
+                os.remove(path)
+    return True
+
+
+def write_activity(state="idle", item="", done=0, total=0, next_check=None):
+    """eve/activity.json: what the sync is doing right now, plus disk space.
+    Separate from status.json, which only changes when its content does."""
+    data = {"state": state, "updated": datetime.datetime.now().isoformat(timespec="seconds")}
+    if item:
+        data["item"] = item
+    if total:
+        data.update(done_mb=done >> 20, total_mb=total >> 20, percent=done * 100 // total)
+    try:
+        du = shutil.disk_usage(ASSETS)
+        data["disk"] = {"total_gb": round(du.total / 2**30, 1), "free_gb": round(du.free / 2**30, 1),
+                        "used_gb": round((du.total - du.free) / 2**30, 1)}
+    except OSError:
+        pass
+    if next_check is not None:
+        data["next_github_check"] = next_check
+    elif state == "idle":
+        data["next_github_check"] = NEXT_GITHUB_CHECK
+    write_if_changed(os.path.join(EVE_ROOT, "activity.json"), json.dumps(data, indent=2) + "\n")
+
+
+NEXT_GITHUB_CHECK = None
+
+
 def write_menus():
     write_boot_ipxe()
     entries = collect_entries()
@@ -1043,10 +1119,11 @@ def write_menus():
     status = {
         "github_checked": checked,
         "config": {"arches": ARCHES, "flavours": FLAVOURS, "lts_lines": LTS_LINES,
-                   "base_url": BASE_URL, "language": LANGUAGE, "menu_mode": MENU_MODE},
-        "entries": [{k: e.get(k) for k in ("path", "source", "tag", "file", "arch", "variant", "flavour",
-                                            "iso_size", "sha256", "sha256_verified", "netboot_ok", "error")}
-                    for e in entries],
+                   "base_url": BASE_URL, "language": LANGUAGE, "menu_mode": MENU_MODE,
+                   "menu_timeout": MENU_TIMEOUT, "sync_interval": SYNC_INTERVAL,
+                   "import_label": IMPORT_LABEL, "defaults": DEFAULTS,
+                   "version": VERSION, "admin_url": ADMIN_URL},
+        "entries": [{k: e.get(k) for k in STATUS_FIELDS} for e in entries],
     }
     # "updated" = when the rest of status.json last changed, not when it was last written
     path = os.path.join(EVE_ROOT, "status.json")
@@ -1055,7 +1132,11 @@ def write_menus():
     if old != json.loads(json.dumps(status)) or not updated:
         updated = datetime.datetime.now().isoformat(timespec="seconds")
     write_if_changed(path, json.dumps({"updated": updated, **status}, indent=2) + "\n")
-    write_if_changed(os.path.join(ASSETS, "index.html"), render_index(entries, checked))
+    write_if_changed(os.path.join(EVE_ROOT, "ui.json"),
+                     json.dumps({"language": LANGUAGE, "texts": T}, ensure_ascii=False, indent=1) + "\n")
+    if not install_ui():
+        # no built UI (running from a source checkout): the simple status page
+        write_if_changed(os.path.join(ASSETS, "index.html"), render_index(entries, checked))
     if changed:
         log(f"Menu updated: {len(entries)} entries")
 
@@ -1064,6 +1145,7 @@ def write_menus():
 # main loop
 # --------------------------------------------------------------------------
 def main():
+    global NEXT_GITHUB_CHECK
     if not BASE_URL:
         log("ENI_BASE_URL is not set (e.g. http://192.168.1.10:8080) - aborting")
         sys.exit(2)
@@ -1082,9 +1164,15 @@ def main():
         f"base={BASE_URL} import={IMPORT_DIR} language={LANGUAGE} mode={MENU_MODE}")
     once = "--once" in sys.argv
     next_gh = 0
+    try:
+        # web UI, menu and status right away, not only after the first downloads
+        write_menus()
+    except Exception as e:  # noqa: BLE001
+        log(f"writing the menu failed: {e}")
     while True:
         try:
-            sync_local()
+            if sync_local():
+                write_menus()
             if time.time() >= next_gh:
                 try:
                     sync_github()
@@ -1095,6 +1183,9 @@ def main():
                     traceback.print_exc()
                     next_gh = time.time() + 3600
             write_menus()
+            NEXT_GITHUB_CHECK = (None if next_gh == float("inf") else
+                                 datetime.datetime.fromtimestamp(next_gh).strftime("%Y-%m-%d %H:%M"))
+            write_activity()
         except Exception as e:  # noqa: BLE001
             log(f"cycle failed: {e}")
             traceback.print_exc()

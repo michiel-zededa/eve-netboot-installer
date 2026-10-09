@@ -9,3 +9,5 @@ docs
 tests
 ruff.toml
 vm
+ui/node_modules
+ui/dist
