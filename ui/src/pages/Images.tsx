@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, CloudDownload, ExternalLink, FolderInput, Layers, Search, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, CloudDownload, ExternalLink, FolderInput, Layers, Search, Trash2, Upload, X } from "lucide-react";
+import { ApiError, api, uploadIso } from "../admin";
+import { Confirm, errorText, useToast } from "../forms";
 import {
   formatSize, imageDate, imageName, imageState, type Activity, type Entry, type Status,
 } from "../api";
@@ -16,12 +18,33 @@ interface Props {
   tab: ImageTab;
   search: string;
   onSearch: (q: string) => void;
+  admin?: boolean;
+  onChanged?: () => void;
 }
 
 const STATE_ORDER = { error: 0, not_netboot: 1, ready: 2 };
 
-export default function Images({ status, activity, tab, search, onSearch }: Props) {
+export default function Images({ status, activity, tab, search, onSearch, admin, onChanged }: Props) {
   const t = useT();
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [upload, setUpload] = useState<{ name: string; pct: number } | null>(null);
+  const [overwrite, setOverwrite] = useState<File | null>(null);
+
+  const doUpload = async (file: File, replace = false) => {
+    setUpload({ name: file.name, pct: 0 });
+    try {
+      await uploadIso(file, replace, (pct) => setUpload({ name: file.name, pct }));
+      toast(`${file.name} uploaded; it appears in the list within a minute.`);
+      onChanged?.();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setOverwrite(file);
+      else toast(errorText(e), "err");
+    } finally {
+      setUpload(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
   const [arch, setArch] = useState("");
   const [variant, setVariant] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "date", desc: true });
@@ -71,7 +94,27 @@ export default function Images({ status, activity, tab, search, onSearch }: Prop
 
   return (
     <div className="page">
-      <PageHeader title={title} subtitle={t("ui_images_text")} />
+      <PageHeader title={title} subtitle={t("ui_images_text")}>
+        {admin && (
+          <>
+            <input ref={fileRef} type="file" accept=".iso" hidden
+              onChange={(e) => e.target.files?.[0] && doUpload(e.target.files[0])} />
+            <button className="btn primary slim" disabled={!!upload} onClick={() => fileRef.current?.click()}>
+              <Upload size={16} /> Upload ISO
+            </button>
+          </>
+        )}
+      </PageHeader>
+      {upload && (
+        <div className="notice upload">
+          <span>Uploading <b>{upload.name}</b> ({upload.pct}%)</span>
+          <div className="progress"><span style={{ width: `${upload.pct}%` }} /></div>
+        </div>
+      )}
+      {overwrite && (
+        <Confirm title="File exists" text={<>{overwrite.name} is already in the import folder. Replace it?</>}
+          confirm="Replace" onConfirm={() => doUpload(overwrite, true)} onClose={() => setOverwrite(null)} />
+      )}
 
       <div className="tabs" role="tablist">
         {(["all", "github", "local"] as ImageTab[]).map((v) => (
@@ -97,7 +140,7 @@ export default function Images({ status, activity, tab, search, onSearch }: Prop
             <Search size={14} /> “{search}” <X size={14} />
           </button>
         )}
-        <span className="muted">{t("ui_count_images", { n: rows.length })}</span>
+        <span className="muted">{rows.length === 1 ? t("ui_count_image") : t("ui_count_images", { n: rows.length })}</span>
         <div className="toolbar-right">
           <select value={arch} onChange={(e) => setArch(e.target.value)} aria-label={t("th_arch")}>
             <option value="">{t("ui_filter_all_arches")}</option>
@@ -158,13 +201,21 @@ export default function Images({ status, activity, tab, search, onSearch }: Prop
         </div>
       )}
 
-      {current && <ImageDetail entry={current} onClose={() => setSelected(null)} />}
+      {current && <ImageDetail entry={current} admin={admin} onClose={() => setSelected(null)}
+        onDeleted={() => { setSelected(null); onChanged?.(); }} />}
     </div>
   );
 }
 
-function ImageDetail({ entry: e, onClose }: { entry: Entry; onClose: () => void }) {
+function ImageDetail({ entry: e, admin, onClose, onDeleted }: {
+  entry: Entry; admin?: boolean; onClose: () => void; onDeleted: () => void;
+}) {
   const t = useT();
+  const toast = useToast();
+  const [ask, setAsk] = useState(false);
+  const remove = () => api.deleteImage(e.file ?? "")
+    .then(() => { toast(`${e.file} deleted; it disappears from the menu within a minute.`); onDeleted(); })
+    .catch((err) => toast(errorText(err), "err"));
   const yesNo = (v?: boolean | null) => (v === undefined || v === null ? "" : v ? t("ui_yes") : t("ui_no"));
   return (
     <Drawer title={<>{imageName(e)} <StatePill state={imageState(e)} /></>} onClose={onClose}>
@@ -187,10 +238,19 @@ function ImageDetail({ entry: e, onClose }: { entry: Entry; onClose: () => void 
         [t("ui_detail_console"), e.console ? <code className="mono">{e.console}</code> : null],
         [t("ui_detail_kernel_args"), e.args ? <code className="mono break block">{e.args}</code> : null],
       ]} />
-      {!e.error && (
-        <a className="btn" href={`eve/${e.path}/`} target="_blank" rel="noreferrer">
-          <ExternalLink size={16} /> {t("ui_open_files")}
-        </a>
+      <div className="form-actions">
+        {!e.error && (
+          <a className="btn" href={`eve/${e.path}/`} target="_blank" rel="noreferrer">
+            <ExternalLink size={16} /> {t("ui_open_files")}
+          </a>
+        )}
+        {admin && e.source === "local" && e.file && (
+          <button className="btn danger" onClick={() => setAsk(true)}><Trash2 size={16} /> Delete from the import folder</button>
+        )}
+      </div>
+      {ask && (
+        <Confirm title="Delete ISO" danger confirm="Delete" onConfirm={remove} onClose={() => setAsk(false)}
+          text={<>Delete <b>{e.file}</b> from the import folder? It is removed from the boot menu.</>} />
       )}
     </Drawer>
   );

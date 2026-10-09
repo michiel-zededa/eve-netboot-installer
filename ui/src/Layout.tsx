@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  ChevronDown, CloudDownload, Disc3, FolderInput, House, Layers, Menu, Monitor, Moon,
-  Network, RefreshCw, Search, Sun, X,
+  Archive, ChevronDown, CloudDownload, Disc3, Download, FolderInput, HardDrive, House, KeyRound, Languages, Layers,
+  LogOut, Menu, Monitor, Moon, Network, RefreshCw, ScrollText, Search, Server, Settings2, Share2, ShieldCheck, Sun,
+  Wrench, X,
 } from "lucide-react";
+import type { Session } from "./admin";
 import type { Status } from "./api";
 import { href, type Route } from "./App";
 import { useT } from "./i18n";
@@ -14,10 +16,12 @@ interface Props {
   search: string;
   onSearch: (q: string) => void;
   onRefresh: () => void;
+  session?: Session | null;
+  onLogout?: () => void;
   children: ReactNode;
 }
 
-export default function Layout({ route, status, search, onSearch, onRefresh, children }: Props) {
+export default function Layout({ route, status, search, onSearch, onRefresh, session, onLogout, children }: Props) {
   const t = useT();
   const [navOpen, setNavOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -64,10 +68,16 @@ export default function Layout({ route, status, search, onSearch, onRefresh, chi
           <kbd>{isMac ? "⌘K" : "Ctrl K"}</kbd>
         </label>
         <div className="top-actions">
+          {!session && status?.config.admin_url && (
+            <a className="btn slim manage" href={status.config.admin_url}>
+              <Settings2 size={16} /> <span>{t("ui_manage")}</span>
+            </a>
+          )}
           <button className="icon-btn" title={t("ui_refresh")} aria-label={t("ui_refresh")} onClick={onRefresh}>
             <RefreshCw size={19} />
           </button>
           <ThemeMenu />
+          {session?.authenticated && <UserMenu hostname={session.hostname} version={session.version} onLogout={onLogout} />}
         </div>
       </header>
 
@@ -93,6 +103,25 @@ export default function Layout({ route, status, search, onSearch, onRefresh, chi
               <span>{t("ui_nav_files")}</span>
             </a>
           </NavGroup>
+          {session?.authenticated && (
+            <>
+              <NavGroup label="Settings">
+                <NavItem to={{ page: "settings", section: "network" }} route={route} icon={<Network size={20} />} label="Network" />
+                <NavItem to={{ page: "settings", section: "server" }} route={route} icon={<Server size={20} />} label="Server address" />
+                <NavItem to={{ page: "settings", section: "mirror" }} route={route} icon={<CloudDownload size={20} />} label="What to mirror" />
+                <NavItem to={{ page: "settings", section: "bootmenu" }} route={route} icon={<Languages size={20} />} label="Boot menu" />
+                <NavItem to={{ page: "settings", section: "defaults" }} route={route} icon={<HardDrive size={20} />} label="Installer defaults" />
+                <NavItem to={{ page: "settings", section: "share" }} route={route} icon={<Share2 size={20} />} label="Import share" />
+                <NavItem to={{ page: "settings", section: "access" }} route={route} icon={<ShieldCheck size={20} />} label="Access and system" />
+              </NavGroup>
+              <NavGroup label="Maintenance">
+                <NavItem to={{ page: "logs" }} route={route} icon={<ScrollText size={20} />} label="Logs" />
+                <NavItem to={{ page: "updates" }} route={route} icon={<Download size={20} />} label="Updates" />
+                <NavItem to={{ page: "backup" }} route={route} icon={<Archive size={20} />} label="Backup and restore" />
+                <NavItem to={{ page: "system" }} route={route} icon={<Wrench size={20} />} label="System" />
+              </NavGroup>
+            </>
+          )}
         </nav>
         <div className="side-foot">
           {status?.config.version ? t("ui_version", { v: status.config.version }) : "EVE-Netboot-Installer"}
@@ -106,7 +135,44 @@ export default function Layout({ route, status, search, onSearch, onRefresh, chi
 }
 
 function sameRoute(a: Route, b: Route) {
-  return a.page === b.page && (a.page !== "images" || (b.page === "images" && a.tab === b.tab));
+  if (a.page !== b.page) return false;
+  if (a.page === "images" && b.page === "images") return a.tab === b.tab;
+  if (a.page === "settings" && b.page === "settings") return a.section === b.section;
+  return true;
+}
+
+function UserMenu({ hostname, version, onLogout }: { hostname: string; version: string; onLogout?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div className="menu-wrap" ref={ref}>
+      <button className="avatar" aria-label="Account" aria-expanded={open} onClick={() => setOpen(!open)}>AD</button>
+      {open && (
+        <div className="menu account" role="menu">
+          <div className="account-head">
+            <span className="avatar big">AD</span>
+            <div>
+              <strong>admin</strong>
+              <div className="muted small">{hostname}</div>
+            </div>
+          </div>
+          <a className="menu-item" href="#/system" onClick={() => setOpen(false)}><KeyRound size={17} /> <span>Change password</span></a>
+          <button className="menu-item danger" onClick={() => { setOpen(false); onLogout?.(); }}>
+            <LogOut size={17} /> <span>Sign out</span>
+          </button>
+          <div className="menu-foot">Appliance version ( {version} )</div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function NavItem(props: { to: Route; route: Route; icon: ReactNode; label: string; count?: number }) {

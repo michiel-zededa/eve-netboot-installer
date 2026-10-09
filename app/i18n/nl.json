@@ -176,5 +176,7 @@
  "ui_defaults_text": "Vooraf ingevuld in het bootmenu; elk is daar vóór de installatie nog te wijzigen.",
  "ui_src_local": "Lokaal",
  "ui_detail_file": "Bestand in de importmap",
- "ui_nav_files": "Alle bestanden"
+ "ui_nav_files": "Alle bestanden",
+ "ui_manage": "Beheren",
+ "ui_count_image": "1 image"
 }

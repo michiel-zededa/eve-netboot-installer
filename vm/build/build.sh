@@ -10,6 +10,8 @@
 #   --disk-size SIZE  virtual disk size (default 16G; the VM grows into a
 #                     bigger disk by itself)
 #   --timeout MIN     give up after MIN minutes (default 90)
+#   --image-file F    use this "docker save | gzip" file instead of pulling
+#                     --image from the registry (testing unreleased images)
 #
 # Output (in --out):
 #   eve-netboot-<version>-<arch>.qcow2          all architectures
@@ -24,7 +26,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
-ARCH="" VERSION="" IMAGE="" OUT="$REPO/dist" DISK_SIZE=16G TIMEOUT=90
+ARCH="" VERSION="" IMAGE="" IMAGE_FILE="" OUT="$REPO/dist" DISK_SIZE=16G TIMEOUT=90
 DEBIAN_URL=${DEBIAN_URL:-https://cloud.debian.org/images/cloud/trixie/latest}
 
 while [ $# -gt 0 ]; do
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
     --out) OUT=$2; shift 2 ;;
     --disk-size) DISK_SIZE=$2; shift 2 ;;
     --timeout) TIMEOUT=$2; shift 2 ;;
+    --image-file) IMAGE_FILE=$2; shift 2 ;;
     *) sed -n '2,25p' "$0"; exit 2 ;;
   esac
 done
@@ -82,6 +85,7 @@ mkdir -p "$WORK/payload"
 cp -a "$REPO/vm/rootfs" "$WORK/payload/rootfs"
 find "$WORK/payload/rootfs" -name '__pycache__' -prune -exec rm -rf {} +
 cp "$HERE/provision.sh" "$REPO/compose.yaml" "$WORK/payload/"
+[ -z "$IMAGE_FILE" ] || cp "$IMAGE_FILE" "$WORK/payload/image.tar.gz"
 tar czf "$WORK/serve/payload.tar.gz" -C "$WORK/payload" .
 python3 "$HERE/build_server.py" "$WORK/serve" "$WORK/port" &
 SERVER=$!

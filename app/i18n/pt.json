@@ -176,5 +176,7 @@
  "ui_defaults_text": "Pré-preenchidos no menu de arranque; cada um ainda pode ser alterado lá antes de instalar.",
  "ui_src_local": "Local",
  "ui_detail_file": "Ficheiro na pasta de importação",
- "ui_nav_files": "Todos os ficheiros"
+ "ui_nav_files": "Todos os ficheiros",
+ "ui_manage": "Gerir",
+ "ui_count_image": "1 imagem"
 }

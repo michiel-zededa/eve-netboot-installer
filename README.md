@@ -65,10 +65,10 @@ What it does:
 | **All installer options at boot** | Set them at boot: target disk, persist disk(s), controller (`eve_install_server`), serial console, soft serial, reboot after install, wipe all disks, debug/pause, and extra kernel arguments. Defaults come from `.env`. |
 | **Safe by default** | A summary screen requires an explicit **`i`** before installing. Without input, the menu falls back to the local disk after a timeout, so a machine that PXE boots by accident never stalls. |
 | **Own iPXE build** | iPXE (x86_64 and arm64 UEFI) is compiled from the official sources during the image build. Only two DHCP options are needed, with no other boot infrastructure. |
-| **Status page** | A read-only web page lists every release and local ISO with its architecture, variant, size and checksum state. It is also available as JSON. |
-| **Multilingual** | Menu and status page in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
+| **Web UI** | A web interface in the look of the ZEDEDA UI (light, dark or system theme): the available images from the GitHub mirror and the import folder with their details (size, checksum, kernel command line, own controller configuration, errors), live download progress, and the DHCP and boot settings. Read-only on port 8080; also available as JSON. |
+| **Multilingual** | Boot menu and web UI in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
-| **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware) with a setup menu on its screen or settings through cloud-init, automatic security updates and app updates with rollback. |
+| **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); automatic security updates and app updates with rollback. |
 
 ## How it works
 
@@ -93,9 +93,9 @@ The stack consists of one image in three roles:
 
 | Service | Role |
 |---|---|
-| `sync` | Mirrors GitHub releases, scans the import folder and generates the iPXE menu, the status page and `boot.ipxe`. |
+| `sync` | Mirrors GitHub releases, scans the import folder, generates the iPXE menu and `boot.ipxe`, and installs the web UI with its data. |
 | `tftp` | Serves the iPXE binaries and `boot.ipxe` (host networking, UDP 69). |
-| `web` | nginx: menu, kernels, initrds, ISOs and the status page. |
+| `web` | nginx: menu, kernels, initrds, ISOs and the web UI. |
 
 ### Why not `sanboot` the ISO?
 
@@ -236,7 +236,7 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 | Update (own build) | `git pull && docker compose up -d --build` |
 | Stop | `docker compose down` (data in `DATA_DIR` is kept) |
 
-The status page (`http://SERVER_IP:HTTP_PORT/`) links to the generated menu (`/eve/eve.ipxe`) and a machine-readable `/eve/status.json`.
+The web UI (`http://SERVER_IP:HTTP_PORT/`) shows the images, activity and boot settings; it links to the generated menu (`/eve/eve.ipxe`). The same data is machine-readable in `/eve/status.json` and `/eve/activity.json`.
 
 ## Languages
 
@@ -286,11 +286,12 @@ How the translations work:
 ├── .env.example           # all settings, documented
 ├── Dockerfile             # multi-stage: iPXE build + runtime image
 ├── app/
-│   ├── eve_sync.py        # mirror, import, menu and status page generator
+│   ├── eve_sync.py        # mirror, import, menu and web UI data
 │   └── i18n/              # translations
 ├── docker/                # iPXE build script, embedded iPXE script, entrypoint
 ├── docs/                  # deployment guide, how it works, DHCP configuration
 ├── tests/                 # unit tests + EVE GRUB fixtures
+├── ui/                    # web UI (React + Vite + TypeScript)
 └── vm/                    # the VM appliance: setup menu, image build, docs
 ```
 

@@ -176,5 +176,7 @@
  "ui_defaults_text": "Forhåndsutfylt i oppstartsmenyen; hver kan fortsatt endres der før installasjon.",
  "ui_src_local": "Lokal",
  "ui_detail_file": "Fil i importmappen",
- "ui_nav_files": "Alle filer"
+ "ui_nav_files": "Alle filer",
+ "ui_manage": "Administrer",
+ "ui_count_image": "1 bilde"
 }

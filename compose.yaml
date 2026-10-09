@@ -43,6 +43,8 @@ services:
       # optional; deliberately not GITHUB_TOKEN, which compose would also take from the shell
       ENI_GITHUB_TOKEN: ${ENI_GITHUB_TOKEN:-${EVE_GITHUB_TOKEN:-}}
       ENI_LEGACY_GITHUB_TOKEN: ${GITHUB_TOKEN:+set}
+      # set by the VM appliance: link to its web management, shown in the web UI
+      ENI_ADMIN_URL: ${ENI_ADMIN_URL:-}
       # names of settings still set with their pre-1.3 EVE_ name (the values are
       # used through the fallbacks above); the sync log asks to rename them
       ENI_LEGACY_NAMES: "${EVE_IMAGE:+EVE_IMAGE }${EVE_SRC_DIR:+EVE_SRC_DIR }${EVE_LANGUAGE:+EVE_LANGUAGE }${EVE_MENU_MODE:+EVE_MENU_MODE }${EVE_MENU_TIMEOUT:+EVE_MENU_TIMEOUT }${EVE_SYNC_INTERVAL:+EVE_SYNC_INTERVAL }${EVE_IMPORT_INTERVAL:+EVE_IMPORT_INTERVAL }${EVE_IMPORT_LABEL:+EVE_IMPORT_LABEL }${EVE_GITHUB_TOKEN:+EVE_GITHUB_TOKEN }"

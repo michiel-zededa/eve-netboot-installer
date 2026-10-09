@@ -5,9 +5,11 @@ server. Download it, import it into your hypervisor, start it and answer a few
 questions on its screen. No Linux or Docker knowledge needed.
 
 - **Works everywhere:** KVM, Proxmox, libvirt, ZEDEDA / EVE-OS, VMware and other hypervisors.
-- **Two ways to set it up:**
+- **Three ways to set it up:**
   - **on the VM's screen:** a setup menu asks for everything;
+  - **in a web browser** (`https://<VM address>:8443/`), for VMs without a screen;
   - **automatically through cloud-init:** you pass the settings when you deploy the VM (ZEDEDA, Proxmox, libvirt, OpenStack). The VM sets itself up with no questions.
+- **Web UI in the ZEDEDA look:** the available images (GitHub mirror and your own ISOs), status and boot settings for everyone on port 8080; all management on port 8443 after logging in.
 - **Stays up to date:** Debian security updates install automatically. The menu updates the system and the application, and rolls back an application update that does not work.
 
 ```text
@@ -17,7 +19,8 @@ questions on its screen. No Linux or Docker knowledge needed.
                                       │
                                 VM "eve-netboot"   (own LAN address)
                                   ├─ setup menu + status on the VM screen
-                                  ├─ tftp (UDP 69) · web (TCP 8080) · sync
+                                  ├─ web management (HTTPS 8443, admin login)
+                                  ├─ tftp (UDP 69) · web UI (TCP 8080) · sync
                                   └─ import folder for your own installer ISOs
 ```
 
@@ -28,7 +31,7 @@ questions on its screen. No Linux or Docker knowledge needed.
 1. [Download](#1-download)
 2. [What the VM needs](#2-what-the-vm-needs)
 3. [Create the VM](#3-create-the-vm) (ZEDEDA, Proxmox, libvirt, VMware)
-4. [Set it up](#4-set-it-up): [on the screen](#4a-on-the-vm-screen) or [through cloud-init](#4b-through-cloud-init)
+4. [Set it up](#4-set-it-up): [on the screen](#4a-on-the-vm-screen), [in a browser](#4c-in-a-web-browser) or [through cloud-init](#4b-through-cloud-init)
 5. [Point DHCP at the VM](#5-point-dhcp-at-the-vm)
 6. [Daily use](#6-daily-use)
 7. [Your own installer ISOs](#7-your-own-installer-isos)
@@ -244,6 +247,20 @@ ssh_authorized_keys:
 
 ---
 
+### 4C. In a web browser
+
+For a VM you cannot see the screen of (headless):
+
+1. Find the VM's address in your DHCP server or hypervisor.
+2. Open `https://<VM address>:8443/`. The browser warns once about the certificate: the VM makes its own (self-signed) certificate. Accept it to continue.
+3. The same steps as on the screen follow: admin password, network, server address, language, mirror, installer defaults, import share. Or start from the settings of another VM (*import*).
+4. After **Apply and start** you are logged in to the [web management](#6-daily-use).
+
+- **Who may do this:** until the VM is set up, anyone who reaches this page can do the setup (first come, first served). Set the VM up right after deploying it, or use cloud-init.
+- **After a setup on the VM's screen** the web management is off; switch it on in the menu: *Advanced settings → Web management*.
+
+---
+
 ## 5. Point DHCP at the VM
 
 Set two options on the DHCP scope of the LAN; the VM screen shows the values:
@@ -262,6 +279,14 @@ first network boot of a machine.
 
 ## 6. Daily use
 
+**In a web browser:**
+
+- `http://<VM address>:8080/` is the public side, for everyone in the network: the available images (GitHub mirror and your own ISOs) with their details, live activity such as downloads, and the DHCP and boot settings. A **Manage** button leads to the management.
+- `https://<VM address>:8443/` is the management: log in with the admin password. It adds every setting of the menu below, the logs, updates, backup and restore, the admin password, reboot and power off, plus:
+  - **Upload ISO** and **Delete** on the *Images* page (no SMB or scp needed);
+  - **Download diagnostics**: one file with logs, status and settings (without passwords or tokens) for troubleshooting;
+  - **network changes with a safety net:** a new address must be confirmed from that address within 2 minutes, otherwise the previous settings come back by themselves.
+
 **On the VM screen** the status is always visible. Press **Enter** and type the
 admin password to open the menu.
 
@@ -272,7 +297,7 @@ leaves it; `eve-netboot menu` brings it back.
 |---|---|
 | Status | Everything on one screen |
 | Network, Server address, What to mirror, Language, Installer defaults, Import share | Change those settings; they are applied immediately |
-| Advanced settings | HTTP port, boot menu timeout, host name, time zone, SSH password login, SSH keys, GitHub token, and the settings file itself |
+| Advanced settings | HTTP port, boot menu timeout, host name, time zone, SSH password login, SSH keys, GitHub token, web management on/off, and the settings file itself |
 | Check GitHub for new EVE-OS releases now | Normally this happens once a day |
 | Show the log | The last 200 lines of the mirror's log |
 | Export settings / Import settings | See [step 9](#9-replace-the-vm-with-a-newer-version) |
@@ -290,6 +315,7 @@ EVE installer ISOs you put in the import folder appear in the boot menu within
 a minute, for example controller-specific builds.
 
 - **Windows / macOS:** enable the import share (menu → *Import share*). Then open `\\<VM address>\eve-import` (Windows Explorer) or `smb://<VM address>/eve-import` (macOS Finder: *Go → Connect to Server*), log in as `admin` with the share password and copy the ISO there.
+- **Web browser:** *Images → Upload ISO* in the web management (`https://<VM address>:8443/`).
 - **scp:** `scp my-installer.iso admin@<VM address>:/srv/eve-netboot/import/`
 
 Put `k` or `kubevirt` as a separate word in the file name of a `k` ISO (for
@@ -361,6 +387,8 @@ the default value. Both work as they are, as cloud-init user-data:
 | `NET_INTERFACE` | | With `static` and several adapters: the adapter that gets the address (default: the first) |
 | `SMB_IMPORT_SHARE` | `no` | `yes` = share the import folder as `\\<VM>\eve-import` |
 | `SMB_PASSWORD` | | Password of that share (user `admin`). Applied and then forgotten. |
+| `WEB_ADMIN` | `yes` | Web management on `https://<VM>:8443/`. A VM set up on its screen starts with `no` |
+| `WEB_ADMIN_PORT` | `8443` | Port of the web management (not `HTTP_PORT`, not 69) |
 
 **The PXE server** (the same as in [.env.example](../.env.example))
 
@@ -393,6 +421,9 @@ the default value. Both work as they are, as cloud-init user-data:
 | VM address *none* | No DHCP answer: check that the VM is on a bridged/switch network; or set a fixed address (menu → *Network*). |
 | PXE client: *PXE-E32 TFTP open timeout* | DHCP next-server is the VM's address? The VM is not behind NAT? Menu → *Show the log*; `curl -s tftp://<VM address>/boot.ipxe` from another machine. |
 | Installers *0 ready* | The first download is still running (menu → *Show the log*), or the VM has no internet access. |
+| The browser warns about the certificate on port 8443 | Expected: the VM makes its own certificate. Accept it once for this address. |
+| Port 8443 does not answer | Web management is off after a setup on the VM's screen: menu → *Advanced settings → Web management*. |
+| After a network change in the browser the page is gone | Open the new address within 2 minutes and confirm there; otherwise the previous settings come back by themselves. |
 | Forgot the admin password | Log in with an SSH key if you set one, or deploy a new VM and import the settings ([step 9](#9-replace-the-vm-with-a-newer-version)). |
 
 Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `sudo cat /var/log/eve-netboot.log`.
@@ -406,6 +437,11 @@ Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `
   - The VM screen shows only the status; the menu needs the admin password.
   - `admin` may run the menu without typing the password again; everything else with `sudo` asks for it.
   - Without a password or key, the VM screen asks to set a password the first time; anyone with access to the VM console can do that, so set one in the setup or through cloud-init.
+- **The web management:**
+  - Only over HTTPS (port 8443), with a login using the admin password; the public side on port 8080 is read-only.
+  - After 5 wrong passwords from one address, logging in from there is blocked for a minute.
+  - Before the VM is set up, the web setup is open to anyone who reaches it (first come, first served). Set the VM up right after deploying, or pass the settings through cloud-init.
+  - It can be switched off completely (`WEB_ADMIN=no`); it is off after a setup on the VM's screen.
 - **Passwords in cloud-init:** `ADMIN_PASSWORD` is not stored in the VM's settings, but the hypervisor keeps the user-data. `ADMIN_PASSWORD_HASH` avoids a readable password there.
 - **Exports** contain no passwords or tokens and are available for 15 minutes only.
 

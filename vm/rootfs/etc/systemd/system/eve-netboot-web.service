@@ -1,0 +1,13 @@
+[Unit]
+Description=EVE-Netboot-Installer appliance: web management (HTTPS)
+After=eve-netboot-setup.service network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/sbin/eve-netboot web
+# exits normally (status 0) when WEB_ADMIN=no; restarted only after a failure
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

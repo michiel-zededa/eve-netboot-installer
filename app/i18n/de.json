@@ -176,5 +176,7 @@
  "ui_defaults_text": "Im Bootmenü vorausgefüllt; jede kann dort vor der Installation noch geändert werden.",
  "ui_src_local": "Lokal",
  "ui_detail_file": "Datei im Importordner",
- "ui_nav_files": "Alle Dateien"
+ "ui_nav_files": "Alle Dateien",
+ "ui_manage": "Verwalten",
+ "ui_count_image": "1 Image"
 }

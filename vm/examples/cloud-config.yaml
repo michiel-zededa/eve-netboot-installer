@@ -46,6 +46,10 @@ eve_netboot:
   # NET_DNS: 192.168.1.1 1.1.1.1
   # NET_INTERFACE: enp0s1
 
+  # --------------------------------------------------- web management --
+  WEB_ADMIN: "yes"
+  # WEB_ADMIN_PORT: 8443
+
   # ----------------------------------------------------- import share --
   SMB_IMPORT_SHARE: "no"
   # SMB_PASSWORD: Another-Password-1

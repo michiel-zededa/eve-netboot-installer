@@ -16,7 +16,7 @@ APT_OPTS="-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 # ---- packages: the newest Debian updates plus what the appliance needs
 # Docker comes from Debian itself (docker.io, docker-compose): within a Debian
 # release it only gets fixes, so "apt upgrade" cannot jump to a new major version.
-PACKAGES="docker.io docker-cli docker-compose apparmor whiptail nano less curl ca-certificates
+PACKAGES="docker.io docker-cli docker-compose apparmor whiptail nano less curl ca-certificates openssl
   samba qemu-guest-agent unattended-upgrades cloud-guest-utils
   systemd-resolved openssh-server sudo python3 python3-yaml"
 ARCH=$(dpkg --print-architecture)
@@ -50,8 +50,23 @@ apt-get -y autoremove --purge
 systemctl disable smbd nmbd samba-ad-dc 2>/dev/null || true
 
 # ---- the application image, so the first start needs no download
+# (build.sh --image-file: a local image instead of the registry, for testing)
 systemctl start docker
-docker pull "$IMAGE"
+if [ -f "$PAYLOAD/image.tar.gz" ]; then
+  loaded=$(docker load -q < "$PAYLOAD/image.tar.gz" | sed -n 's/^Loaded image: //p' | head -n1)
+  docker tag "$loaded" "$IMAGE"
+else
+  docker pull "$IMAGE"
+fi
+# the web UI also on the VM itself: the web setup needs it before the stack runs
+install -d -m 0755 /usr/local/lib/eve-netboot
+cid=$(docker create "$IMAGE")
+if docker cp "$cid:/app/ui" /usr/local/lib/eve-netboot/ui; then
+  chown -R root:root /usr/local/lib/eve-netboot/ui
+else
+  echo "the image has no web UI (/app/ui)"
+fi
+docker rm "$cid" >/dev/null
 
 # ---- appliance files
 # owned by root; existing directories (/etc, /usr, ...) keep their owner and mode
@@ -82,7 +97,7 @@ systemctl enable systemd-networkd systemd-resolved
 ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 # ---- services: setup at boot, the console on tty1 instead of a login prompt
-systemctl enable docker eve-netboot-setup.service eve-netboot-console.service
+systemctl enable docker eve-netboot-setup.service eve-netboot-console.service eve-netboot-web.service
 systemctl mask getty@tty1.service
 systemctl enable unattended-upgrades
 echo eve-netboot > /etc/hostname
@@ -110,7 +125,7 @@ cloud-init clean --logs --seed
 rm -f /etc/ssh/ssh_host_*
 truncate -s 0 /etc/machine-id
 rm -f /var/lib/dbus/machine-id
-rm -rf /var/lib/eve-netboot/userdata.sha256 /etc/eve-netboot/.configured /etc/eve-netboot/settings.env
+rm -rf /var/lib/eve-netboot/userdata.sha256 /etc/eve-netboot/.configured /etc/eve-netboot/settings.env /etc/eve-netboot/tls
 rm -f /root/.bash_history /home/*/.bash_history /var/log/eve-netboot.log
 find /var/log -type f \( -name '*.gz' -o -name '*.[0-9]' \) -delete
 find /var/log -type f -exec truncate -s 0 {} +

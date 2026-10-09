@@ -21,6 +21,16 @@ docs/how-it-works.md for the boot chain.
   `vm/build/build.sh` builds the qcow2/VMDK/OVA by booting the Debian cloud
   image in QEMU and running `provision.sh` inside; image.yml does this for
   every `v*` tag and attaches the images to the release.
+- `ui/`: the web UI, React 19 + Vite + TypeScript, ZEDEDA product UI look
+  (purple accent, sidebar, cards, pills; light/dark/system). Built in a Docker
+  stage into /app/ui; the sync copies it into www/ (install_ui). Reads
+  eve/status.json, eve/activity.json, eve/ui.json (texts in ENI_LANGUAGE; UI
+  strings are ui_* keys in app/i18n, all 8 languages). No CDN: offline LANs.
+  On the VM's port 8443 it also talks to /api/ (management, English only).
+- `vm/rootfs/usr/local/lib/eve-netboot/eve_netboot_web.py`: the appliance's
+  HTTPS management API (`eve-netboot web`, stdlib only, uses the eve-netboot
+  module as `core`). Serves the UI from www/ or, before the stack ran, from
+  the copy provision.sh extracted from the image (/usr/local/lib/eve-netboot/ui).
 - `tests/`: unittest suite; `tests/fixtures/eve-<tag>/` are the real GRUB files
   of EVE releases.
 
@@ -34,13 +44,22 @@ python3 -m unittest discover -s tests -v
 vm/build/build.sh --arch arm64 --version dev --image ghcr.io/michiel-zededa/eve-netboot-installer:latest
 ```
 
+```bash
+cd ui && npm ci && npm run build
+```
+
+`ENI_DEV_SERVER=http://<server>:8080 npm run dev` serves the UI with data from
+a running server. `build.sh --image-file` bakes a local `docker save | gzip`
+image into the VM (testing an unreleased UI or app).
+
 The appliance tests (`tests/test_appliance.py`) need PyYAML for the
 #cloud-config cases; without it those are skipped. They also check that
 `vm/examples/eve-netboot.env` and `cloud-config.yaml` mention every setting
 of `.env.example` and of the appliance: add new settings there too.
 
-CI (`.github/workflows/test.yml`) also runs `ruff check app tests deploy`
-(config in `ruff.toml`) and `shellcheck --severity=warning` on the shell scripts.
+CI (`.github/workflows/test.yml`) also runs `ruff check app tests vm`
+(config in `ruff.toml`), `shellcheck --severity=warning` on the shell scripts
+and the UI type check + build.
 `image.yml` builds and pushes the multi-arch image to GHCR.
 
 ## Rules
@@ -67,6 +86,11 @@ CI (`.github/workflows/test.yml`) also runs `ruff check app tests deploy`
   appliance migrates them. New ENI_ settings need no fallback.
 - The repository is generic for any Docker Compose host. No site-specific
   hosts, paths or NAS-specific instructions.
+- Web API (eve_netboot_web.py): every change needs the `X-ENI: 1` header
+  (CSRF), sessions are HttpOnly+Secure+SameSite=Strict cookies, setup is open
+  only until configured. Never name a Handler method like a
+  BaseHTTPRequestHandler/StreamRequestHandler one (`setup`, `handle`, `finish`
+  ...): `setup()` silently broke every request once.
 - Appliance: the console shows only status without login; the menu needs the
   admin password. Without cloud-init settings nothing starts until the setup
   is done. Passwords (ADMIN_PASSWORD, SMB_PASSWORD) are applied and never

@@ -176,5 +176,7 @@
  "ui_defaults_text": "Pré-remplies dans le menu de démarrage ; chacune peut encore y être modifiée avant l'installation.",
  "ui_src_local": "Local",
  "ui_detail_file": "Fichier dans le dossier d'import",
- "ui_nav_files": "Tous les fichiers"
+ "ui_nav_files": "Tous les fichiers",
+ "ui_manage": "Gérer",
+ "ui_count_image": "1 image"
 }

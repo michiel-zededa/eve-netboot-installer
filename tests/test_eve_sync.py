@@ -365,8 +365,9 @@ class GithubTokenTest(unittest.TestCase):
         with open(os.path.join(HERE, "..", "compose.yaml")) as f:
             compose = f.read()
         uses = set(re.findall(r"\$\{ENI_([A-Z_]+):-", compose))
-        self.assertTrue(uses)
-        for name in uses:
+        # settings renamed in 1.3 need the fallback; newer ENI_ settings (ADMIN_URL) do not
+        self.assertEqual(set(eve_sync.RENAMED) - uses, {"SRC_DIR", "IMAGE"} - uses)
+        for name in uses & set(eve_sync.RENAMED):
             self.assertIn("${ENI_%s:-${EVE_%s:-" % (name, name), compose)
             self.assertIn("${EVE_%s:+EVE_%s }" % (name, name), compose)
 
