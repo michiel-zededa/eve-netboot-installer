@@ -59,7 +59,7 @@ them, and you can delete them.
 
 ```sh
 SERVER_IP=192.168.1.10                                           # <- answer 1
-ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.0
+ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.1
 ```
 
 The `env.example` of a release already has `ENI_IMAGE` set to that release's
@@ -72,7 +72,7 @@ port 8080 and shows the menu in English.
 
 ```sh
 SERVER_IP=192.168.1.10                                           # <- answer 1
-ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.0
+ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.1
 
 # where your own installer ISOs are (for example controller-specific builds)
 IMPORT_DIR=/srv/iso/eve                                          # <- your folder
@@ -128,7 +128,7 @@ Chain it from your menu with `chain http://192.168.1.10:8080/eve/eve.ipxe`.
 
 | | Prebuilt image (recommended) | Own build |
 |---|---|---|
-| Setting | `ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.0` (already set in a release's `env.example`) | leave `ENI_IMAGE` empty |
+| Setting | `ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.1` (already set in a release's `env.example`) | leave `ENI_IMAGE` empty |
 | Needs | `compose.yaml` and `.env`, both attached to every release | a clone of this repository |
 | First start | about 1 minute | about 5 minutes (iPXE is compiled) |
 | Pin a version | `ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.0.0` | `git checkout v1.0.0` |
@@ -159,7 +159,7 @@ curl -fsSLO https://github.com/michiel-zededa/eve-netboot-installer/releases/lat
 curl -fsSL -o .env https://github.com/michiel-zededa/eve-netboot-installer/releases/latest/download/env.example
 ```
 
-For a specific version, replace `latest/download` with `download/v1.5.0`
+For a specific version, replace `latest/download` with `download/v1.5.1`
 (or another tag).
 
 **For your own build**, clone the repository instead:
@@ -261,7 +261,7 @@ Create two folders on the NAS, for example in a shared folder:
    ```sh
    # the NAS address, as the PXE clients see it
    SERVER_IP=192.168.1.10
-   ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.0
+   ENI_IMAGE=ghcr.io/michiel-zededa/eve-netboot-installer:1.5.1
    # data folder and import folder from step 3B
    DATA_DIR=/srv/data/eve-netboot
    IMPORT_DIR=/srv/iso/eve
