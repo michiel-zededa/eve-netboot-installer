@@ -1,0 +1,15 @@
+[Unit]
+Description=EVE Netboot Installer DHCP service (dnsmasq; off unless switched on)
+Documentation=https://github.com/michiel-zededa/eve-netboot-installer/blob/main/vm/README.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/eve-netboot/dnsmasq.conf
+
+[Service]
+# only DHCP (port=0 in the configuration: no DNS); written by "eve-netboot apply"
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/eve-netboot/dnsmasq.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -498,6 +498,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "primary_interface": c.primary_interface(),
             },
             "choices": {"languages": c.LANGUAGES, "serials": c.SERIALS},
+            # what the DHCP service uses for its empty settings (the VM's own network)
+            "dhcp": c.dhcp_defaults(s),
             "image": c.current_image(s),
         }
 
@@ -621,6 +623,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             p = c.compose("logs", "--no-color", "--tail", str(lines), source, check=False)
             # compose still writes terminal control codes (e.g. "erase line")
             return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stdout + p.stderr)
+        if source == "dhcp":
+            return c.dhcp_log(lines)
         if source == "appliance":
             text = c.read(c.LOG)
             return "\n".join(text.splitlines()[-lines:]) + "\n"
@@ -686,6 +690,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "sync.log": self.logs("sync", 2000),
             "tftp.log": self.logs("tftp", 500),
             "web.log": self.logs("web", 500),
+            "dhcp.log": self.logs("dhcp", 1000),
+            "dnsmasq.conf": c.read(c.DNSMASQ_CONF),
             "journal.log": self.logs("system", 2000),
             "status.json": c.read(os.path.join(c.WWW, "eve", "status.json")),
             "activity.json": c.read(os.path.join(c.WWW, "eve", "activity.json")),

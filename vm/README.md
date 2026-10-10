@@ -257,6 +257,11 @@ For a VM you cannot see the screen of (headless):
 
 ## 5. Point DHCP at the VM
 
+Two ways: change the DHCP server of the LAN once (5A), or let the VM answer
+the network boot requests itself (5B).
+
+### 5A. Set two options on your DHCP server
+
 Set two options on the DHCP scope of the LAN; the VM screen shows the values:
 
 | Option | Value |
@@ -268,6 +273,29 @@ Set two options on the DHCP scope of the LAN; the VM screen shows the values:
 Kea, OPNsense/pfSense and MikroTik, and
 [docs/deployment.md](../docs/deployment.md#6-first-network-boot) describes the
 first network boot of a machine.
+
+### 5B. Or let the VM answer DHCP itself
+
+Menu or web management → *DHCP service* (or `DHCP_MODE` through cloud-init).
+It is off by default.
+
+| Mode | What it does | When |
+|---|---|---|
+| **Proxy** | Answers only the network boot requests (proxyDHCP): which boot file, from which server. The DHCP server of the LAN keeps handing out the addresses and needs no change. | A LAN with a router or DHCP server you cannot or do not want to change. Recommended. |
+| **Server** | All of DHCP: addresses, gateway, DNS and the boot settings. | A network of its own for installing machines, without another DHCP server. Needs a fixed address for the VM (*Network → Fixed address*). |
+
+The other settings may stay empty: they then follow the VM's own network.
+
+| Setting | Empty means |
+|---|---|
+| Network adapter | the VM's adapter |
+| First / last address (server) | a block of the VM's network clear of its own address and the gateway; for `192.168.1.20/24` that is `.128` to `.254` |
+| Gateway, DNS servers (server) | the VM's own; `none` hands out none |
+| Lease time (server) | 12 hours |
+
+- **Never run two DHCP servers in one network:** machines get wrong addresses. Next to a router, use *Proxy*.
+- **Check it:** the status screen shows the DHCP service and, in server mode, the number of leases; *Logs → DHCP* shows every request and the current leases.
+- **Boot files** are chosen per machine: x86_64 UEFI gets `eve-x86_64.efi`, arm64 UEFI `eve-arm64.efi`.
 
 ---
 
@@ -298,9 +326,9 @@ leaves it; `eve-netboot menu` brings it back.
 | Menu item | Does |
 |---|---|
 | Status | Everything on one screen |
-| Network, Server address, What to mirror, Language and boot menu, Installer defaults, SMB share, Access and system | The same groups of settings as the pages of the web management: a list of the settings with their values; **Enter** changes one, **Done** applies the changes |
+| Network, Server address, DHCP service, What to mirror, Language and boot menu, Installer defaults, SMB share, Access and system | The same groups of settings as the pages of the web management: a list of the settings with their values; **Enter** changes one, **Done** applies the changes |
 | Check GitHub now | Normally this happens at the set interval (every day) |
-| Logs | The mirror (sync), TFTP, web server, appliance or system log |
+| Logs | The mirror (sync), TFTP, web server, DHCP, appliance or system log |
 | Export settings / Import settings | See [step 9](#9-replace-the-vm-with-a-newer-version) |
 | Update the system / Update EVE Netboot Installer | See [step 8](#8-updates) |
 | Change the admin password, Reboot, Power off, Command line, Log out | |

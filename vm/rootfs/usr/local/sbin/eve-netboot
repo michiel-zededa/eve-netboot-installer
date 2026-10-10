@@ -67,6 +67,10 @@ NET_STATIC = os.path.join(NETWORKD, "10-eve-netboot-static.network")
 NET_DHCP = os.path.join(NETWORKD, "20-eve-netboot.network")
 SSHD_CONF = "/etc/ssh/sshd_config.d/10-eve-netboot.conf"
 SMB_CONF = "/etc/samba/smb.conf"
+DNSMASQ_CONF = os.path.join(ETC, "dnsmasq.conf")
+DHCP_LEASES = "/var/lib/misc/dnsmasq.leases"
+DHCP_UNIT = "eve-netboot-dhcp.service"
+DHCP_MODES = ("off", "proxy", "server")
 ADMIN = "admin"
 PRODUCT = "EVE Netboot Installer"
 REPO = "michiel-zededa/eve-netboot-installer"
@@ -78,7 +82,9 @@ SERIALS = ["none", "ttyS0", "ttyS1", "ttyAMA0"]
 # settings that configure the VM itself; everything else goes to the stack's .env
 VM_KEYS = {"HOSTNAME", "NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS",
            "ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "ADMIN_SSH_KEYS", "SSH_PASSWORD_LOGIN",
-           "SMB_IMPORT_SHARE", "SMB_PASSWORD", "WEB_ADMIN", "WEB_ADMIN_PORT"}
+           "SMB_IMPORT_SHARE", "SMB_PASSWORD", "WEB_ADMIN", "WEB_ADMIN_PORT",
+           "DHCP_MODE", "DHCP_INTERFACE", "DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS",
+           "DHCP_LEASE_TIME"}
 # applied once and never stored
 CONSUMED = {"ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "SMB_PASSWORD"}
 # not in an export (secrets)
@@ -94,6 +100,10 @@ DEFAULTS = {
     # web management over HTTPS; switched off when the setup was done on the console
     "WEB_ADMIN": "yes",
     "WEB_ADMIN_PORT": "8443",
+    # DHCP service of the VM: off, proxy (only the network boot answers, next to
+    # the DHCP server the LAN has) or server (all of DHCP, for an isolated network)
+    "DHCP_MODE": "off",
+    "DHCP_LEASE_TIME": "12h",
     "SERVER_IP": "auto",
     "HTTP_PORT": "8080",
     "TZ": "UTC",
@@ -239,7 +249,10 @@ def parse_user_data(text):
         for k, v in section.items():
             k = str(k).strip().upper()
             if KEY_RE.match(k) and v is not None:
-                out[k] = ("yes" if v else "no") if isinstance(v, bool) else str(v).strip()
+                if isinstance(v, bool):     # YAML reads yes/no/on/off as booleans
+                    out[k] = ("on" if v else "off") if k == "DHCP_MODE" else ("yes" if v else "no")
+                else:
+                    out[k] = str(v).strip()
         return migrate(out) or None
     if first.startswith("#!") or first.lower().startswith("content-type") or first.startswith("#include"):
         return None
@@ -317,6 +330,7 @@ def problems(s):
         errors.append(("ENI_MENU_TIMEOUT", tr("adm_err_timeout")))
     if os.path.isdir("/usr/share/zoneinfo") and not os.path.isfile(os.path.join("/usr/share/zoneinfo", get(s, "TZ"))):
         errors.append(("TZ", tr("adm_err_tz")))
+    errors += dhcp_problems(s)
     serial = s.get("EVE_DEFAULT_SERIAL", "")
     if serial and serial not in SERIALS:
         errors.append(("EVE_DEFAULT_SERIAL", tr("adm_err_serial", values=" ".join(SERIALS))))
@@ -326,6 +340,138 @@ def problems(s):
         if "\n" in v:
             errors.append((k, tr("adm_err_one_line", key=k)))
     return errors
+
+
+def dhcp_problems(s):
+    """[(setting, problem)] of the DHCP service settings."""
+    errors = []
+    mode = get(s, "DHCP_MODE")
+    if mode not in DHCP_MODES:
+        return [("DHCP_MODE", tr("adm_err_dhcp_mode"))]
+    if mode == "off":
+        return []
+    if not re.fullmatch(r"(\d+[smhdw]?|infinite)", get(s, "DHCP_LEASE_TIME")):
+        errors.append(("DHCP_LEASE_TIME", tr("adm_err_dhcp_lease")))
+    gw = get(s, "DHCP_GATEWAY")
+    if gw and gw != "none" and not is_ipv4(gw):
+        errors.append(("DHCP_GATEWAY", tr("adm_err_dhcp_gateway")))
+    for d in get(s, "DHCP_DNS").replace(",", " ").split():
+        if d != "none" and not is_ipv4(d):
+            errors.append(("DHCP_DNS", tr("adm_err_dns", value=d)))
+    if mode != "server":
+        return errors
+    # a DHCP server hands out addresses of its own network: it needs a fixed one
+    if get(s, "NET_MODE") != "static":
+        errors.append(("DHCP_MODE", tr("adm_err_dhcp_static")))
+        return errors
+    iface, own = get(s, "NET_INTERFACE"), get(s, "DHCP_INTERFACE")
+    if own and iface and own != iface:
+        errors.append(("DHCP_INTERFACE", tr("adm_err_dhcp_interface", interface=iface)))
+    try:
+        net = ipaddress.ip_interface(get(s, "NET_ADDRESS"))
+    except ValueError:
+        return errors       # reported for NET_ADDRESS
+    start, end = dhcp_range(s, net)
+    if not start:
+        errors.append(("DHCP_RANGE_START", tr("adm_err_dhcp_no_range")))
+        return errors
+    for key, value in (("DHCP_RANGE_START", start), ("DHCP_RANGE_END", end)):
+        if not is_ipv4(value) or ipaddress.ip_address(value) not in net.network:
+            errors.append((key, tr("adm_err_dhcp_range", network=net.network)))
+    if any(k == "DHCP_RANGE_START" or k == "DHCP_RANGE_END" for k, _ in errors):
+        return errors
+    lo, hi = ipaddress.ip_address(start), ipaddress.ip_address(end)
+    if lo > hi:
+        errors.append(("DHCP_RANGE_END", tr("adm_err_dhcp_order")))
+    elif lo <= net.ip <= hi:
+        errors.append(("DHCP_RANGE_START", tr("adm_err_dhcp_own", address=net.ip)))
+    return errors
+
+
+def is_ipv4(value):
+    try:
+        ipaddress.IPv4Address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def auto_range(net, exclude=()):
+    """A block of addresses for DHCP in the network of ip_interface net, clear of
+    the addresses in exclude (the VM, the gateway): the upper half of the
+    network, else its second quarter; at most 200 addresses. (None, None) when
+    the network is too small or nothing fits."""
+    network = net.network
+    if network.num_addresses < 8:
+        return None, None
+    base, size = int(network.network_address), network.num_addresses
+    taken = {int(ipaddress.ip_address(x)) for x in exclude if x and is_ipv4(x)}
+    for lo, hi in ((base + size // 2, base + size - 2), (base + size // 4, base + size // 2 - 1)):
+        hi = min(hi, lo + 199)
+        if not any(lo <= t <= hi for t in taken):
+            return str(ipaddress.ip_address(lo)), str(ipaddress.ip_address(hi))
+    return None, None
+
+
+def dhcp_range(s, net, gateway=None):
+    """(start, end): the settings, or the automatic range of net."""
+    gw = gateway if gateway is not None else get(s, "NET_GATEWAY")
+    start, end = auto_range(net, (str(net.ip), gw))
+    return get(s, "DHCP_RANGE_START") or start, get(s, "DHCP_RANGE_END") or end
+
+
+def dhcp_plan(s, addresses, primary, gateway, dns):
+    """What the DHCP service uses: the settings, and for empty ones the VM's own
+    network. addresses = [(interface, 'a.b.c.d/nn')], primary = the VM's main
+    interface, gateway and dns = what the VM itself uses. None without an address."""
+    static = get(s, "NET_MODE") == "static"
+    iface = get(s, "DHCP_INTERFACE") or (get(s, "NET_INTERFACE") if static else "") or primary
+    if not iface and addresses:
+        iface = addresses[0][0]
+    if static and get(s, "DHCP_MODE") == "server":
+        net = ipaddress.ip_interface(get(s, "NET_ADDRESS"))
+        own_gateway = get(s, "NET_GATEWAY")
+        own_dns = get(s, "NET_DNS").replace(",", " ").split()
+    else:
+        found = dict(addresses).get(iface)
+        if not found:
+            return None
+        net = ipaddress.ip_interface(found)
+        own_gateway = get(s, "NET_GATEWAY") if static else gateway
+        own_dns = get(s, "NET_DNS").replace(",", " ").split() if static else dns
+    gw = get(s, "DHCP_GATEWAY") or own_gateway or ""
+    dns_list = get(s, "DHCP_DNS").replace(",", " ").split() or own_dns or []
+    start, end = dhcp_range(s, net, own_gateway or "")
+    return {"interface": iface, "address": str(net.ip), "network": net.network, "start": start or "",
+            "end": end or "", "gateway": "" if gw == "none" else gw,
+            "dns": [d for d in dns_list if d != "none"], "lease": get(s, "DHCP_LEASE_TIME")}
+
+
+def render_dnsmasq(s, plan, server_ip):
+    """dnsmasq.conf of the DHCP service: only DHCP (no DNS); boot files per CPU."""
+    mode = get(s, "DHCP_MODE")
+    net = plan["network"]
+    L = ["# managed by eve-netboot - change with: eve-netboot menu (DHCP service)",
+         "port=0", f"interface={plan['interface']}", f"dhcp-leasefile={DHCP_LEASES}", "log-dhcp",
+         # UEFI clients by architecture (RFC 4578): 7 and 9 x86_64, 11 arm64
+         "dhcp-match=set:efi-x86_64,option:client-arch,7",
+         "dhcp-match=set:efi-x86_64,option:client-arch,9",
+         "dhcp-match=set:efi-arm64,option:client-arch,11"]
+    if mode == "proxy":
+        # next to the LAN's own DHCP server: only the network boot answers
+        L += [f"dhcp-range={net.network_address},proxy,{net.netmask}",
+              f'pxe-service=BC_EFI,"{PRODUCT}",eve-x86_64.efi,{server_ip}',
+              f'pxe-service=X86-64_EFI,"{PRODUCT}",eve-x86_64.efi,{server_ip}',
+              f'pxe-service=ARM64_EFI,"{PRODUCT}",eve-arm64.efi,{server_ip}']
+    else:
+        L += [f"dhcp-range={plan['start']},{plan['end']},{net.netmask},{plan['lease']}",
+              "dhcp-authoritative",
+              # an empty option: no router / DNS server, instead of this VM itself
+              "dhcp-option=option:router" + (f",{plan['gateway']}" if plan["gateway"] else ""),
+              "dhcp-option=option:dns-server" + ("," + ",".join(plan["dns"]) if plan["dns"] else ""),
+              f"dhcp-boot=tag:efi-x86_64,eve-x86_64.efi,,{server_ip}",
+              f"dhcp-boot=tag:efi-arm64,eve-arm64.efi,,{server_ip}"]
+    return "\n".join(L) + "\n"
 
 
 def validate(s, keys=None):
@@ -362,7 +508,7 @@ def render_stack_env(s, server_ip, image):
               "ENI_IMPORT_LABEL"):
         app.setdefault(k, DEFAULTS[k])
     app.update({"SERVER_IP": server_ip, "DATA_DIR": DATA, "IMPORT_DIR": IMPORT, "ENI_IMAGE": image,
-                "ENI_ADMIN_URL": admin_url(s, server_ip)})
+                "ENI_ADMIN_URL": admin_url(s, server_ip), "ENI_DHCP_MODE": get(s, "DHCP_MODE")})
     lines = ["# generated by eve-netboot from " + SETTINGS + " - do not edit"]
     lines += [f"{k}='{app[k]}'" for k in sorted(app)]
     return "\n".join(lines) + "\n"
@@ -524,6 +670,38 @@ def primary_interface():
     return addrs[0][0] if addrs else ""
 
 
+def dhcp_log(lines):
+    """The DHCP service's log and its current leases."""
+    leases = read(DHCP_LEASES).strip()
+    p = run(["journalctl", "--no-pager", "-n", str(lines), "-u", DHCP_UNIT], check=False, quiet=True)
+    return (f"# {DHCP_LEASES}\n{leases or '-'}\n\n" if leases else "") + p.stdout
+
+
+def default_gateway():
+    p = run(["ip", "-4", "route", "show", "default"], check=False, quiet=True)
+    m = re.search(r"\bvia (\S+)", p.stdout)
+    return m.group(1) if m else ""
+
+
+def system_dns():
+    """The DNS servers the VM itself uses (not systemd-resolved's local stub)."""
+    text = read("/run/systemd/resolve/resolv.conf") or read("/etc/resolv.conf")
+    return [m for m in re.findall(r"(?m)^nameserver\s+(\S+)", text) if is_ipv4(m) and not m.startswith("127.")]
+
+
+def dhcp_defaults(s):
+    """The values the DHCP service uses now for its settings (shown for empty ones)."""
+    try:
+        plan = dhcp_plan(s, ipv4_addresses(), primary_interface(), default_gateway(), system_dns())
+    except ValueError:
+        plan = None
+    if not plan:
+        return {}
+    return {"DHCP_INTERFACE": plan["interface"], "DHCP_RANGE_START": plan["start"], "DHCP_RANGE_END": plan["end"],
+            "DHCP_GATEWAY": plan["gateway"] or "none", "DHCP_DNS": " ".join(plan["dns"]) or "none",
+            "DHCP_NETWORK": str(plan["network"])}
+
+
 def wait_for_ip(seconds=60):
     end = time.time() + seconds
     while time.time() < end:
@@ -671,9 +849,14 @@ def apply_smb(s):
         run(["systemctl", "disable", "--now", "smbd"], check=False, quiet=True)
 
 
+def server_address(s, wait=True):
+    if get(s, "SERVER_IP") != "auto":
+        return get(s, "SERVER_IP")
+    return wait_for_ip() if wait else primary_ip()
+
+
 def apply_stack(s, wait=True):
-    ip = primary_ip() if wait is False else wait_for_ip()
-    server_ip = ip if get(s, "SERVER_IP") == "auto" else get(s, "SERVER_IP")
+    server_ip = server_address(s, wait)
     if not server_ip:
         raise RuntimeError(tr("adm_err_no_ip"))
     for d in (os.path.join(DATA, "www"), os.path.join(DATA, "tftp"), IMPORT):
@@ -699,8 +882,29 @@ def apply(s, stack=True):
         write(CONFIGURED, datetime.datetime.now().isoformat() + "\n")
         if stack:
             apply_stack(clean)
+        apply_dhcp(clean)
         apply_web(clean)
     return clean
+
+
+def apply_dhcp(s):
+    """Start, change or stop the DHCP service (dnsmasq, eve-netboot-dhcp.service)."""
+    if get(s, "DHCP_MODE") == "off":
+        if os.path.exists(DNSMASQ_CONF):
+            os.remove(DNSMASQ_CONF)
+            log("DHCP service switched off")
+        run(["systemctl", "disable", "--now", "--quiet", DHCP_UNIT], check=False, quiet=True)
+        return
+    plan = dhcp_plan(s, ipv4_addresses(), primary_interface(), default_gateway(), system_dns())
+    server_ip = server_address(s, wait=False)
+    if not plan or not server_ip:
+        log("DHCP service not started: no IPv4 address yet")
+        return
+    changed = write(DNSMASQ_CONF, render_dnsmasq(s, plan, server_ip))
+    run(["systemctl", "enable", "--quiet", DHCP_UNIT], check=False, quiet=True)
+    run(["systemctl", "restart" if changed else "start", DHCP_UNIT], check=False, quiet=True)
+    if changed:
+        log(f"DHCP service: {get(s, 'DHCP_MODE')} on {plan['interface']} ({plan['network']})")
 
 
 def apply_web(s):
@@ -808,7 +1012,14 @@ def status_info():
         "smb_share": f"\\\\{ip}\\eve-import" if get(s, "SMB_IMPORT_SHARE") == "yes" else "",
         "reboot_required": os.path.exists("/run/reboot-required"),
         "last_error": read(os.path.join(STATE, "last-error")).strip()[:200],
+        "dhcp": {"mode": get(s, "DHCP_MODE")},
     }
+    if info["configured"] and info["dhcp"]["mode"] != "off":
+        d = dhcp_defaults(s)
+        active = run(["systemctl", "is-active", DHCP_UNIT], check=False, quiet=True).stdout.strip() == "active"
+        info["dhcp"].update(interface=d.get("DHCP_INTERFACE", "?"), start=d.get("DHCP_RANGE_START", ""),
+                            end=d.get("DHCP_RANGE_END", ""), active=active,
+                            leases=len([x for x in read(DHCP_LEASES).splitlines() if x.strip()]))
     if info["configured"]:
         info["services"] = stack_state()
         status = json.loads(read(os.path.join(WWW, "eve", "status.json"), "{}") or "{}")
@@ -831,7 +1042,21 @@ def status_rows(info):
             (tr("adm_st_web_admin"), info["web_admin"] or tr("adm_st_web_admin_off"), "" if info["web_admin"] else "warn")]
     if info["smb_share"]:
         rows.append((tr("adm_st_smb_share"), f"{info['smb_share']}  ({tr('adm_user')} {ADMIN})", ""))
+    rows.append(dhcp_row(info.get("dhcp") or {"mode": "off"}))
     return rows
+
+
+def dhcp_row(d):
+    """(label, value, tone) of the DHCP service for the status screen."""
+    label = tr("adm_st_dhcp_service")
+    if d["mode"] == "off":
+        return label, tr("adm_st_dhcp_off"), ""
+    if not d.get("active"):
+        return label, tr("adm_st_dhcp_down", mode=d["mode"]), "err"
+    if d["mode"] == "proxy":
+        return label, tr("adm_st_dhcp_proxy", interface=d.get("interface", "?")), "ok"
+    return label, tr("adm_st_dhcp_server", start=d.get("start", ""), end=d.get("end", ""),
+                     n=d.get("leases", 0)), "ok"
 
 
 def status_lines():
@@ -1111,10 +1336,15 @@ FIELDS = {
     "SMB_IMPORT_SHARE": ("yesno", None), "SMB_PASSWORD": ("smbpassword", None),
     "WEB_ADMIN": ("yesno", None), "WEB_ADMIN_PORT": ("text", None), "SSH_PASSWORD_LOGIN": ("yesno", None),
     "ADMIN_SSH_KEYS": ("keys", None), "TZ": ("text", None),
+    "DHCP_MODE": ("choice", list(DHCP_MODES)), "DHCP_INTERFACE": ("dhcpadapter", None),
+    "DHCP_RANGE_START": ("text", None), "DHCP_RANGE_END": ("text", None), "DHCP_GATEWAY": ("text", None),
+    "DHCP_DNS": ("text", None), "DHCP_LEASE_TIME": ("text", None),
 }
 SECTIONS = {
     "network": ["NET_MODE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "NET_INTERFACE", "HOSTNAME"],
     "server": ["SERVER_IP", "HTTP_PORT"],
+    "dhcp": ["DHCP_MODE", "DHCP_INTERFACE", "DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS",
+             "DHCP_LEASE_TIME"],
     "mirror": ["EVE_ARCHES", "EVE_FLAVOURS", "EVE_LTS_LINES", "ENI_SYNC_INTERVAL", "EVE_GITHUB_REPO",
                "ENI_GITHUB_TOKEN"],
     "bootmenu": ["ENI_LANGUAGE", "ENI_MENU_MODE", "ENI_MENU_TIMEOUT", "ENI_IMPORT_LABEL",
@@ -1131,6 +1361,9 @@ SHOWN_IF = {
     "NET_DNS": lambda s: get(s, "NET_MODE") == "static",
     "NET_INTERFACE": lambda s: get(s, "NET_MODE") == "static",
     "SMB_PASSWORD": lambda s: get(s, "SMB_IMPORT_SHARE") == "yes",
+    "DHCP_INTERFACE": lambda s: get(s, "DHCP_MODE") != "off",
+    **{k: (lambda s: get(s, "DHCP_MODE") == "server")
+       for k in ("DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS", "DHCP_LEASE_TIME")},
 }
 
 
@@ -1158,6 +1391,9 @@ def option(key, value):
 def shown_value(s, key):
     kind, opts = FIELDS[key]
     v = s.get(key) or get(s, key)
+    if key.startswith("DHCP_") and key not in ("DHCP_MODE", "DHCP_LEASE_TIME") and not s.get(key):
+        # empty = what the VM's own network gives
+        return f"{tr('adm_auto')}: {dhcp_defaults(s).get(key) or '-'}"
     if kind == "yesno":
         return tr("adm_on") if v == "yes" else tr("adm_off")
     if kind == "onezero":
@@ -1173,7 +1409,8 @@ def shown_value(s, key):
     if kind == "checks":
         return ", ".join(option(key, x) for x in v.split()) or "-"
     if kind == "choice":
-        return option(key, v) if v else "-"
+        # "Proxy: only the network boot answers ..." -> "Proxy" (the full text is in the choice)
+        return option(key, v).split(":")[0].strip() if v else "-"
     if not v:
         return tr("adm_p_" + key.lower()) if has_text("adm_p_" + key.lower()) else "-"
     return v
@@ -1191,6 +1428,10 @@ def edit_field(title, key, s):
         s[key] = choose(title, text, [(o, option(key, o)) for o in opts], default=current or None)
     elif kind == "language":
         s[key] = choose(title, text, LANGUAGES, default=current or "en")
+    elif kind == "dhcpadapter":
+        auto = dhcp_defaults(s).get("DHCP_INTERFACE", "-")
+        s[key] = choose(title, text, [("", f"{tr('adm_auto')}: {auto}")] + [(n, n) for n in adapters()],
+                        default=current or "")
     elif kind == "adapter":
         addrs = dict(ipv4_addresses())
         items = [("", tr("adm_o_net_interface_first"))] + [
@@ -1238,6 +1479,10 @@ def screen_section(section, s):
                 s = screen_network(s, hostname=False)
                 continue
             edit_field(title, c, s)
+            if c == "DHCP_MODE" and s[c] == "server" and old.get(c) != "server" and not yesno(
+                    title, tr("adm_dhcp_warning"), yes=tr("adm_btn_continue"), no=tr("adm_btn_cancel"),
+                    default_no=True, tone="warn"):
+                raise Cancel
         except Cancel:
             s = old
             continue
@@ -1477,6 +1722,8 @@ def show_log(source):
         text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stdout + p.stderr)
     elif source == "appliance":
         text = "\n".join(read(LOG).splitlines()[-300:])
+    elif source == "dhcp":
+        text = dhcp_log(300)
     else:
         text = run(["journalctl", "--no-pager", "-n", "300", "-u", "eve-netboot-setup", "-u", "eve-netboot-web",
                     "-u", "docker"], check=False, quiet=True).stdout
@@ -1496,6 +1743,7 @@ def menu():
                 ("status", tr("adm_nav_status")),
                 ("network", tr("adm_sec_network")),
                 ("server", tr("adm_sec_server")),
+                ("dhcp", tr("adm_sec_dhcp")),
                 ("mirror", tr("adm_sec_mirror")),
                 ("bootmenu", tr("adm_sec_bootmenu")),
                 ("defaults", tr("adm_sec_defaults")),
@@ -1530,7 +1778,7 @@ def menu():
                 msg("GitHub", tr("adm_sync_started"), tone="ok")
             elif c == "logs":
                 source = choose(tr("adm_nav_logs"), tr("adm_logs_text"),
-                                [(x, option("LOG", x)) for x in ("sync", "tftp", "web", "appliance", "system")],
+                                [(x, option("LOG", x)) for x in ("sync", "tftp", "web", "dhcp", "appliance", "system")],
                                 cancel=tr("adm_btn_back"), ok=tr("adm_btn_open"))
                 show_log(source)
             elif c == "export":

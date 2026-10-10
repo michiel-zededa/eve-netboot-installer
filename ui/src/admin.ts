@@ -27,6 +27,7 @@ export interface SettingsInfo {
   secrets: { admin_password: boolean; smb_password: boolean; github_token: boolean };
   network: { interfaces: { name: string; address: string }[]; primary_ip: string; primary_interface: string };
   choices: { languages: [string, string][]; serials: string[] };
+  dhcp?: Record<string, string>;
   image: string;
 }
 

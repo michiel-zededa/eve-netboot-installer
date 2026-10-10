@@ -17,7 +17,7 @@ APT_OPTS="-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 # Docker comes from Debian itself (docker.io, docker-compose): within a Debian
 # release it only gets fixes, so "apt upgrade" cannot jump to a new major version.
 PACKAGES="docker.io docker-cli docker-compose apparmor whiptail console-setup nano less curl ca-certificates openssl
-  samba qemu-guest-agent unattended-upgrades cloud-guest-utils
+  samba dnsmasq-base qemu-guest-agent unattended-upgrades cloud-guest-utils
   systemd-resolved openssh-server sudo python3 python3-yaml"
 ARCH=$(dpkg --print-architecture)
 # Debian's standard kernel instead of the cloud kernel: the cloud kernel has no

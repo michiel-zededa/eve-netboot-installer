@@ -54,6 +54,17 @@ eve_netboot:
   SMB_IMPORT_SHARE: "no"
   # SMB_PASSWORD: Another-Password-1
 
+  # ----------------------------------------------------- DHCP service --
+  # off | proxy (next to the network's DHCP server) | server (isolated network,
+  # needs NET_MODE: static); see eve-netboot.env. Empty settings follow the VM.
+  DHCP_MODE: "off"
+  # DHCP_INTERFACE: enp0s1
+  # DHCP_RANGE_START: 192.168.1.100
+  # DHCP_RANGE_END: 192.168.1.199
+  # DHCP_GATEWAY: 192.168.1.1
+  # DHCP_DNS: 192.168.1.1 1.1.1.1
+  # DHCP_LEASE_TIME: 12h
+
   # ======================================================= PXE server ==
   SERVER_IP: auto
   HTTP_PORT: 8080

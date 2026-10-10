@@ -1,5 +1,5 @@
 import { ExternalLink } from "lucide-react";
-import { serverHost, type Status } from "../api";
+import { DHCP_TEXT, dhcpMode, serverHost, type Status } from "../api";
 import { Card, CopyField, KeyValues, PageHeader } from "../components";
 import { useT } from "../i18n";
 
@@ -20,8 +20,8 @@ export default function Boot({ status }: { status: Status | null }) {
     <div className="page">
       <PageHeader title={t("ui_nav_boot")} subtitle={t("ui_boot_text")} />
       <div className="grid-2">
-        <Card title={t("ui_dhcp_title")}>
-          <p className="muted small">{t("ui_dhcp_text")}</p>
+        <Card title={dhcpMode(status) === "off" ? t("ui_dhcp_title") : t("ui_dhcp_title_own")}>
+          <p className="muted small">{t(DHCP_TEXT[dhcpMode(status)])}</p>
           <CopyField label={t("ui_next_server")} value={host} />
           <CopyField label={t("ui_boot_file")} value="eve-x86_64.efi" hint={t("ui_boot_file_x86")} />
           <CopyField label={t("ui_boot_file")} value="eve-arm64.efi" hint={t("ui_boot_file_arm")} />

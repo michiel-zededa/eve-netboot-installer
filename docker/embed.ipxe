@@ -5,6 +5,9 @@
 echo
 echo EVE Netboot Installer (iPXE ${version}, ${buildarch})
 dhcp || dhcp || goto failed
+# with proxyDHCP (the boot server answers next to the LAN's DHCP server) the
+# server address comes from that answer, not from the one with the IP address
+isset ${proxydhcp/next-server} && set next-server ${proxydhcp/next-server} ||
 isset ${next-server} || goto failed
 chain --autofree tftp://${next-server}/boot.ipxe || goto failed
 # the menu was left via "boot from local disk": back to the firmware boot order

@@ -23,7 +23,7 @@ export function Logs() {
     const timer = setInterval(load, 5000);
     return () => clearInterval(timer);
   }, [load, auto]);
-  const sources = ["sync", "tftp", "web", "appliance", "system"].map((v): [string, string] => [v, t(`adm_o_log_${v}`)]);
+  const sources = ["sync", "tftp", "web", "dhcp", "appliance", "system"].map((v): [string, string] => [v, t(`adm_o_log_${v}`)]);
   return (
     <div className="page">
       <PageHeader title={t("adm_nav_logs")} subtitle={t("adm_logs_subtitle")} />

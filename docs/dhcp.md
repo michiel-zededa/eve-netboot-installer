@@ -11,6 +11,11 @@ If your DHCP server can match the client architecture (option 93), hand out
 `eve-arm64.efi` to arch `0x000b` and `eve-x86_64.efi` to `0x0007`/`0x0009`.
 Otherwise use `eve-x86_64.efi`.
 
+**VM appliance:** instead of changing your DHCP server, the VM can answer the
+network boot requests itself, next to your DHCP server (proxyDHCP), or be the
+DHCP server of an isolated network. See
+[VM appliance: let the VM answer DHCP itself](../vm/README.md#5b-or-let-the-vm-answer-dhcp-itself).
+
 Already using a boot file name for something else and want to switch without
 touching DHCP? Set `IPXE_ALIASES_X86_64` (and/or `IPXE_ALIASES_ARM64`) to that
 name; the iPXE binary is then also published under it. Make sure only one TFTP

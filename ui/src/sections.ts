@@ -7,7 +7,7 @@ import type { SettingsInfo } from "./admin";
 import type { Field, FieldType, Values } from "./forms";
 import { has, type TFunc } from "./i18n";
 
-export type SectionId = "network" | "server" | "mirror" | "bootmenu" | "defaults" | "share" | "access";
+export type SectionId = "network" | "server" | "dhcp" | "mirror" | "bootmenu" | "defaults" | "share" | "access";
 
 export interface Section {
   id: SectionId;
@@ -59,6 +59,27 @@ export const SECTIONS: Section[] = [
         help: `${t("adm_h_server_ip")} (${t("adm_this_vm", { ip: info?.network.primary_ip || "?" })})` }),
       field(t, "HTTP_PORT", "number", { placeholder: "8080" }),
     ],
+  },
+  {
+    id: "dhcp",
+    warning: "adm_dhcp_warning",
+    fields: (info, t) => {
+      // empty = what the VM's own network gives; shown as the placeholder
+      const auto = (k: string) => `${t("adm_auto")}: ${info?.dhcp?.[k] || "-"}`;
+      const isOn = (v: Values) => (v.DHCP_MODE || "off") !== "off";
+      const isServer = (v: Values) => v.DHCP_MODE === "server";
+      return [
+        field(t, "DHCP_MODE", "select", { values: ["off", "proxy", "server"] }),
+        field(t, "DHCP_INTERFACE", "select", { showIf: isOn,
+          options: [["", auto("DHCP_INTERFACE")], ...(info?.network.interfaces ?? []).map((i): [string, string] =>
+            [i.name, `${i.name} (${i.address})`])] }),
+        field(t, "DHCP_RANGE_START", "text", { showIf: isServer, placeholder: auto("DHCP_RANGE_START") }),
+        field(t, "DHCP_RANGE_END", "text", { showIf: isServer, placeholder: auto("DHCP_RANGE_END") }),
+        field(t, "DHCP_GATEWAY", "text", { showIf: isServer, placeholder: auto("DHCP_GATEWAY") }),
+        field(t, "DHCP_DNS", "text", { showIf: isServer, placeholder: auto("DHCP_DNS") }),
+        field(t, "DHCP_LEASE_TIME", "text", { showIf: isServer, placeholder: "12h" }),
+      ];
+    },
   },
   {
     id: "mirror",

@@ -39,6 +39,7 @@ export interface Config {
   defaults?: Record<string, string | boolean>;
   version?: string;
   admin_url?: string;
+  dhcp_mode?: "off" | "proxy" | "server";   // the VM's own DHCP service
 }
 
 export interface Status {
@@ -109,3 +110,10 @@ export function serverHost(cfg?: Config): string {
     return location.hostname;
   }
 }
+
+/** The VM's own DHCP service (off on a plain Docker Compose server). */
+export function dhcpMode(status: Status | null): "off" | "proxy" | "server" {
+  return status?.config.dhcp_mode ?? "off";
+}
+
+export const DHCP_TEXT = { off: "ui_dhcp_text", proxy: "ui_dhcp_text_proxy", server: "ui_dhcp_text_server" } as const;

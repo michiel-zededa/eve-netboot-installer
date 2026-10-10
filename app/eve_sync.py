@@ -91,6 +91,8 @@ UI_DIR = _env("ENI_UI_DIR", os.path.join(APP_DIR, "ui"))
 VERSION = _env("ENI_VERSION", "dev")
 # management UI of the VM appliance, shown as a link in the web UI (empty = none)
 ADMIN_URL = _env("ENI_ADMIN_URL")
+# the VM appliance's own DHCP service (off / proxy / server); a plain compose host has none
+DHCP_MODE = _env("ENI_DHCP_MODE", "off")
 BASE_URL = _env("ENI_BASE_URL").rstrip("/")
 ARCHES = _env("EVE_ARCHES", "amd64").split()
 FLAVOURS = _env("EVE_FLAVOURS", "kvm").split()
@@ -1185,7 +1187,7 @@ def write_menus():
                    "base_url": BASE_URL, "language": LANGUAGE, "menu_mode": MENU_MODE,
                    "menu_timeout": MENU_TIMEOUT, "sync_interval": SYNC_INTERVAL,
                    "import_label": IMPORT_LABEL, "defaults": DEFAULTS,
-                   "version": VERSION, "admin_url": ADMIN_URL},
+                   "version": VERSION, "admin_url": ADMIN_URL, "dhcp_mode": DHCP_MODE},
         "entries": [{k: e.get(k) for k in STATUS_FIELDS} for e in entries],
     }
     # "updated" = when the rest of status.json last changed, not when it was last written

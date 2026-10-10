@@ -1,5 +1,5 @@
 import { CircleAlert, CircleCheck, CloudDownload, FolderInput, HardDrive, Loader, Moon } from "lucide-react";
-import { imageState, serverHost, type Activity, type Status } from "../api";
+import { DHCP_TEXT, dhcpMode, imageState, serverHost, type Activity, type Status } from "../api";
 import { Card, CopyField, Donut, PageHeader, StatCard } from "../components";
 import { useT } from "../i18n";
 
@@ -52,8 +52,8 @@ export default function Home({ status, activity }: { status: Status | null; acti
           <ActivityView activity={activity} status={status} />
         </Card>
 
-        <Card title={t("ui_dhcp_title")}>
-          <p className="muted small">{t("ui_dhcp_text")}</p>
+        <Card title={dhcpMode(status) === "off" ? t("ui_dhcp_title") : t("ui_dhcp_title_own")}>
+          <p className="muted small">{t(DHCP_TEXT[dhcpMode(status)])}</p>
           <CopyField label={t("ui_next_server")} value={host} />
           <CopyField label={t("ui_boot_file")} value="eve-x86_64.efi" hint={t("ui_boot_file_x86")} />
           <CopyField label={t("ui_boot_file")} value="eve-arm64.efi" hint={t("ui_boot_file_arm")} />

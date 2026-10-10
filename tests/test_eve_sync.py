@@ -270,7 +270,7 @@ class WebUiTest(unittest.TestCase):
         eve_sync.write_menus()
         with open(os.path.join(eve_sync.EVE_ROOT, "status.json")) as f:
             status = json.load(f)
-        for key in ("menu_timeout", "defaults", "version", "admin_url", "import_label"):
+        for key in ("menu_timeout", "defaults", "version", "admin_url", "import_label", "dhcp_mode"):
             self.assertIn(key, status["config"])
         with open(os.path.join(eve_sync.EVE_ROOT, "ui.json"), encoding="utf-8") as f:
             ui = json.load(f)

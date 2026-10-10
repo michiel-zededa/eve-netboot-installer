@@ -101,6 +101,11 @@ and the UI type check + build.
   same groups (`SECTIONS` in eve-netboot == `ui/src/sections.ts`, tested). A
   change in one belongs in the other. The look of the console and the iPXE menu
   follows EVE-OS's own console (black, inverted selection, coloured states).
+- Appliance DHCP service (dnsmasq-base, eve-netboot-dhcp.service): off by
+  default; proxy (only the PXE answers, next to the LAN's DHCP server) or
+  server (needs NET_MODE static). Empty DHCP_* settings follow the VM's own
+  network (`dhcp_plan`). It must never answer DNS (port=0). The iPXE embed
+  script takes the boot server from `${proxydhcp/next-server}` when set.
 - Appliance: the console shows only status without login; the menu needs the
   admin password. Without cloud-init settings nothing starts until the setup
   is done. Passwords (ADMIN_PASSWORD, SMB_PASSWORD) are applied and never

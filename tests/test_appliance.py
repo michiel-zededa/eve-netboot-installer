@@ -204,6 +204,93 @@ class TextsTest(unittest.TestCase):
         self.assertIn("\x1b[30;47m Enter \x1b[0m: log in", screen)    # keys highlighted
 
 
+class DhcpTest(unittest.TestCase):
+    """The VM's own DHCP service: proxy next to a DHCP server, or a server."""
+
+    STATIC = {"NET_MODE": "static", "NET_INTERFACE": "enp0s1", "NET_ADDRESS": "192.168.1.20/24",
+              "NET_GATEWAY": "192.168.1.1", "NET_DNS": "192.168.1.1 1.1.1.1"}
+    ADDRS = [("enp0s1", "192.168.1.20/24"), ("enp0s2", "10.9.0.5/16")]
+
+    def plan(self, s, primary="enp0s1"):
+        return app.dhcp_plan(s, self.ADDRS, primary, "192.168.1.1", ["192.168.1.53"])
+
+    def test_off_by_default(self):
+        self.assertEqual(app.get({}, "DHCP_MODE"), "off")
+        self.assertEqual(app.validate({"DHCP_MODE": "server"}), [app.tr("adm_err_dhcp_static")])
+
+    def test_automatic_range_avoids_the_vm_and_the_gateway(self):
+        net = app.ipaddress.ip_interface
+        self.assertEqual(app.auto_range(net("192.168.1.20/24"), ("192.168.1.20", "192.168.1.1")),
+                         ("192.168.1.128", "192.168.1.254"))
+        # the VM in the upper half: the second quarter instead
+        self.assertEqual(app.auto_range(net("192.168.1.200/24"), ("192.168.1.200",)),
+                         ("192.168.1.64", "192.168.1.127"))
+        self.assertEqual(app.auto_range(net("10.9.0.5/16"), ()), ("10.9.128.0", "10.9.128.199"))   # at most 200
+        self.assertEqual(app.auto_range(net("192.168.1.1/30"), ()), (None, None))
+
+    def test_server_follows_the_vm_settings(self):
+        s = {**self.STATIC, "DHCP_MODE": "server"}
+        self.assertEqual(app.validate(s), [])
+        p = self.plan(s)
+        self.assertEqual((p["interface"], p["start"], p["end"], p["gateway"], p["dns"], p["lease"]),
+                         ("enp0s1", "192.168.1.128", "192.168.1.254", "192.168.1.1", ["192.168.1.1", "1.1.1.1"], "12h"))
+        conf = app.render_dnsmasq(s, p, "192.168.1.20")
+        for line in ("port=0", "interface=enp0s1", "dhcp-range=192.168.1.128,192.168.1.254,255.255.255.0,12h",
+                     "dhcp-authoritative", "dhcp-option=option:router,192.168.1.1",
+                     "dhcp-option=option:dns-server,192.168.1.1,1.1.1.1",
+                     "dhcp-match=set:efi-x86_64,option:client-arch,7",
+                     "dhcp-boot=tag:efi-x86_64,eve-x86_64.efi,,192.168.1.20",
+                     "dhcp-boot=tag:efi-arm64,eve-arm64.efi,,192.168.1.20"):
+            self.assertIn(line + "\n", conf)
+        # an isolated network: no gateway, no DNS server, instead of the VM itself
+        conf = app.render_dnsmasq(s, self.plan({**s, "DHCP_GATEWAY": "none", "DHCP_DNS": "none"}), "192.168.1.20")
+        self.assertIn("dhcp-option=option:router\n", conf)
+        self.assertIn("dhcp-option=option:dns-server\n", conf)
+
+    def test_proxy_works_with_dhcp_and_only_answers_the_boot(self):
+        s = {"DHCP_MODE": "proxy"}
+        self.assertEqual(app.validate(s), [])
+        p = self.plan(s)
+        conf = app.render_dnsmasq(s, p, "192.168.1.20")
+        self.assertIn("dhcp-range=192.168.1.0,proxy,255.255.255.0\n", conf)
+        self.assertIn('pxe-service=X86-64_EFI,"EVE Netboot Installer",eve-x86_64.efi,192.168.1.20\n', conf)
+        self.assertIn('pxe-service=BC_EFI,"EVE Netboot Installer",eve-x86_64.efi,192.168.1.20\n', conf)
+        self.assertIn('pxe-service=ARM64_EFI,"EVE Netboot Installer",eve-arm64.efi,192.168.1.20\n', conf)
+        self.assertNotIn("dhcp-authoritative", conf)
+        self.assertEqual(self.plan({**s, "DHCP_INTERFACE": "enp0s2"})["network"], app.ipaddress.ip_network("10.9.0.0/16"))
+        self.assertIsNone(self.plan({**s, "DHCP_INTERFACE": "enp9s9"}))      # no address there
+
+    def test_server_settings_are_checked(self):
+        s = {**self.STATIC, "DHCP_MODE": "server"}
+        for bad, key in (({"DHCP_RANGE_START": "10.0.0.1"}, "DHCP_RANGE_START"),
+                         ({"DHCP_RANGE_START": "192.168.1.250", "DHCP_RANGE_END": "192.168.1.240"}, "DHCP_RANGE_END"),
+                         ({"DHCP_RANGE_START": "192.168.1.10", "DHCP_RANGE_END": "192.168.1.30"}, "DHCP_RANGE_START"),
+                         ({"DHCP_INTERFACE": "enp0s2"}, "DHCP_INTERFACE"),
+                         ({"DHCP_GATEWAY": "router"}, "DHCP_GATEWAY"),
+                         ({"DHCP_LEASE_TIME": "soon"}, "DHCP_LEASE_TIME"),
+                         ({"DHCP_MODE": "maybe"}, "DHCP_MODE")):
+            with self.subTest(bad=bad):
+                self.assertEqual([k for k, _ in app.problems({**s, **bad})], [key])
+
+    def test_yaml_off_is_off(self):
+        if not HAVE_YAML:
+            self.skipTest("python3-yaml not installed")
+        self.assertEqual(app.parse_user_data("#cloud-config\neve_netboot:\n  DHCP_MODE: off\n"), {"DHCP_MODE": "off"})
+
+    def test_compose_passes_on_what_the_appliance_sets(self):
+        # a variable the appliance writes into the stack's .env but compose.yaml
+        # does not pass on never reaches the containers
+        env = app.render_stack_env({}, "192.168.1.20", "img:1")
+        with open(os.path.join(HERE, "..", "compose.yaml"), encoding="utf-8") as f:
+            used = set(re.findall(r"\$\{(\w+)", f.read()))
+        self.assertEqual(set(re.findall(r"(?m)^(\w+)=", env)) - used, set())
+
+    def test_the_stack_knows_the_mode(self):
+        env = app.render_stack_env({"DHCP_MODE": "proxy"}, "192.168.1.20", "img:1")
+        self.assertIn("ENI_DHCP_MODE='proxy'", env)
+        self.assertNotIn("DHCP_RANGE", env)
+
+
 class DefaultsTest(unittest.TestCase):
 
     def test_shown_defaults_are_those_of_the_stack(self):

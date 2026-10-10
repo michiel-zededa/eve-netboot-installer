@@ -82,7 +82,7 @@ All taken on a test VM in a documentation network (`192.0.2.0/24`).
 | **Web UI** | A web interface in the look of the ZEDEDA UI (light, dark or system theme): the available images from the GitHub mirror and the import folder with their details (size, checksum, kernel command line, own controller configuration, errors), live download progress, and the DHCP and boot settings. Read-only on port 8080; also available as JSON. |
 | **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
-| **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); automatic security updates and app updates with rollback. |
+| **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); an optional DHCP service of its own (proxyDHCP next to your DHCP server, or a full DHCP server for an isolated network); automatic security updates and app updates with rollback. |
 
 ## How it works
 

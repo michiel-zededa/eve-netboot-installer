@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Archive, ChevronDown, CloudDownload, Disc3, Download, HardDrive, House, KeyRound, Languages, Layers,
-  LogOut, Menu, Monitor, Moon, Network, RefreshCw, ScrollText, Search, Server, Settings2, Share2, ShieldCheck, Sun,
+  LogOut, Menu, Router, Monitor, Moon, Network, RefreshCw, ScrollText, Search, Server, Settings2, Share2, ShieldCheck, Sun,
   Wrench, X,
 } from "lucide-react";
 import type { Session } from "./admin";
@@ -98,6 +98,7 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
               <NavGroup label={t("adm_nav_settings")}>
                 <NavItem to={{ page: "settings", section: "network" }} route={route} icon={<Network size={20} />} label={t("adm_sec_network")} />
                 <NavItem to={{ page: "settings", section: "server" }} route={route} icon={<Server size={20} />} label={t("adm_sec_server")} />
+                <NavItem to={{ page: "settings", section: "dhcp" }} route={route} icon={<Router size={20} />} label={t("adm_sec_dhcp")} />
                 <NavItem to={{ page: "settings", section: "mirror" }} route={route} icon={<CloudDownload size={20} />} label={t("adm_sec_mirror")} />
                 <NavItem to={{ page: "settings", section: "bootmenu" }} route={route} icon={<Languages size={20} />} label={t("adm_sec_bootmenu")} />
                 <NavItem to={{ page: "settings", section: "defaults" }} route={route} icon={<HardDrive size={20} />} label={t("adm_sec_defaults")} />
