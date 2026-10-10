@@ -569,6 +569,36 @@ def import_candidates():
     return sorted(found)
 
 
+def parse_release(text):
+    """'17.0.0-lts-kvm-amd64' (EVE-OS's /etc/eve-release) -> ('17.0.0-lts', 'kvm', 'amd64')."""
+    parts = text.strip().rsplit("-", 2)
+    if len(parts) != 3 or parts[2] not in ("amd64", "arm64", "riscv64") \
+            or not re.fullmatch(r"[a-z]{1,10}", parts[1]) or not re.match(r"\d+\.\d+", parts[0]):
+        return None
+    return tuple(parts)
+
+
+def iso_release(iso):
+    """Version, variant and architecture of an installer ISO, from
+    /etc/eve-release in its rootfs_installer.img (squashfs); None when that
+    cannot be read. Unlike grub_include.cfg it also tells kvm and k apart."""
+    if not shutil.which("unsquashfs"):
+        return None
+    tmp = os.path.join(LOC_ROOT, ".release")
+    rmtree(tmp)
+    try:
+        os.makedirs(tmp)
+        subprocess.run(["bsdtar", "-xf", iso, "-C", tmp, "rootfs_installer.img"], check=True,
+                       capture_output=True, timeout=900)
+        p = subprocess.run(["unsquashfs", "-cat", os.path.join(tmp, "rootfs_installer.img"), "etc/eve-release"],
+                           capture_output=True, text=True, timeout=300)
+        return parse_release(p.stdout) if p.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    finally:
+        rmtree(tmp)
+
+
 def sync_local():
     os.makedirs(LOC_ROOT, exist_ok=True)
     changed = False
@@ -581,6 +611,16 @@ def sync_local():
         stamp = f"{st.st_size}:{int(st.st_mtime)}"
         meta = json.loads(read_text(os.path.join(dest, "meta.json"), "{}") or "{}")
         if meta.get("stamp") == stamp:
+            if "release_checked" not in meta and not meta.get("error") and rel.lower().endswith(".iso"):
+                # imported by an older version: read its version once
+                release = iso_release(full)
+                meta["release_checked"] = True
+                if release:
+                    meta["release"] = release[0]
+                    if release[1] in ("kvm", "k"):
+                        meta["variant"] = release[1]
+                write_if_changed(os.path.join(dest, "meta.json"), json.dumps(meta, indent=2) + "\n")
+                changed = True
             continue
         if meta.get("error_stamp") == stamp:
             continue  # known-bad file, don't retry every minute
@@ -599,20 +639,28 @@ def sync_local():
                 os.makedirs(tmpd)
                 subprocess.run(["bsdtar", "-xf", full, "-C", tmpd, "installer.iso"], check=True)
                 src = os.path.join(tmpd, "installer.iso")
-            # The file name is the only hint: every installer ISO, 'k' included,
-            # sets eve_flavor kvm in its grub_include.cfg (the installer itself
-            # always boots as kvm), so the ISO cannot tell the variant.
+            # Every installer ISO, 'k' included, sets eve_flavor kvm in its
+            # grub_include.cfg (the installer itself always boots as kvm). The
+            # version and variant are in /etc/eve-release in the ISO's rootfs;
+            # the file name is the fallback.
             base = os.path.basename(rel).lower()
             variant = ("k" if re.search(r"(^|[._-])(k|kubevirt)([._-]|$)", base)
                        else "kvm" if "kvm" in base else "")
+            release = iso_release(src)
+            extra = {"release_checked": True}
+            if release:
+                extra["release"] = release[0]
+                if release[1] in ("kvm", "k"):
+                    variant = release[1]
             m = prepare_dir(src, dest, None, "kvm", {
                 "source": "local", "file": rel, "stamp": stamp, "name": os.path.basename(rel),
-                "variant": variant,
+                "variant": variant, **extra,
                 "mtime": datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d"),
             })
             if src != full:
                 rmtree(os.path.dirname(src))
-            log(f"Local: {rel} ready ({m['arch']}, variant={variant or '?'}, netboot_ok={m['netboot_ok']})")
+            log(f"Local: {rel} ready (EVE-OS {extra.get('release', '?')}, {m['arch']}, variant={variant or '?'}, "
+                f"netboot_ok={m['netboot_ok']})")
         except Exception as e:  # noqa: BLE001
             log(f"Local: {rel} FAILED: {e}")
             rmtree(dest + ".tmp")
@@ -668,6 +716,8 @@ def collect_entries():
             name = meta.get("file", d)
             if meta.get("error"):
                 meta["label"] = f"{name}  [{T['label_error']}: {meta['error'][:40]}]"
+            elif meta.get("release"):
+                meta["label"] = f"{meta['release']}  {meta.get('variant') or '?'}  {name}  ({meta.get('mtime', '')})"
             else:
                 meta["label"] = f"{name}  ({meta.get('mtime', '')})"
             entries.append(meta)
@@ -1062,7 +1112,7 @@ def write_boot_ipxe():
 
 STATUS_FIELDS = ("path", "source", "tag", "file", "name", "arch", "variant", "flavour", "iso_size",
                  "sha256", "sha256_verified", "netboot_ok", "error", "published", "mtime", "prepared",
-                 "ucode", "config_img", "args", "console", "label")
+                 "ucode", "config_img", "args", "console", "label", "release")
 
 
 def install_ui():

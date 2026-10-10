@@ -34,6 +34,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import ssl
 import subprocess
 import tarfile
@@ -775,10 +776,44 @@ class TLSServer(http.server.ThreadingHTTPServer):
     def finish_request(self, request, client_address):
         request.settimeout(120)
         try:
+            first = request.recv(1, socket.MSG_PEEK)
+        except OSError:
+            return
+        if first and first != b"\x16":
+            # plain HTTP on the HTTPS port: an address typed without https://
+            # (Safari then even falls back to http). Send the browser to https.
+            return redirect_to_https(request)
+        try:
             request = self.context.wrap_socket(request, server_side=True)
         except (ssl.SSLError, OSError):
             return
         self.RequestHandlerClass(request, client_address, self)
+
+
+def redirect_to_https(sock):
+    """Answer one plain HTTP request with a redirect to the same address over https."""
+    data = b""
+    try:
+        while b"\r\n\r\n" not in data and len(data) < 16384:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        head = data.decode("latin-1").split("\r\n")
+        path = head[0].split(" ")[1] if len(head[0].split(" ")) > 1 else "/"
+        host = next((line.split(":", 1)[1].strip() for line in head[1:] if line.lower().startswith("host:")), "")
+        if not path.startswith("/") or not re.fullmatch(r"[A-Za-z0-9.\-\[\]:]+", host or "-"):
+            path, host = "/", ""
+        body = b"Use https.\n"
+        location = f"https://{host}{path}" if host else ""
+        sock.sendall((f"HTTP/1.1 301 Moved Permanently\r\nLocation: {location}\r\n" if location else
+                      "HTTP/1.1 400 Bad Request\r\n").encode("latin-1") +
+                     f"Content-Type: text/plain\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+                     + body)
+    except (OSError, IndexError):
+        pass
+    finally:
+        sock.close()
 
 
 def serve(core):

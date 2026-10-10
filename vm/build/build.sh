@@ -86,7 +86,9 @@ cp -a "$REPO/vm/rootfs" "$WORK/payload/rootfs"
 find "$WORK/payload/rootfs" -name '__pycache__' -prune -exec rm -rf {} +
 cp "$HERE/provision.sh" "$REPO/compose.yaml" "$WORK/payload/"
 [ -z "$IMAGE_FILE" ] || cp "$IMAGE_FILE" "$WORK/payload/image.tar.gz"
-tar czf "$WORK/serve/payload.tar.gz" -C "$WORK/payload" .
+# COPYFILE_DISABLE: macOS tar would add "._name" files for extended attributes,
+# which end up in /etc (cloud-init chokes on ._90-eve-netboot.cfg)
+COPYFILE_DISABLE=1 tar czf "$WORK/serve/payload.tar.gz" -C "$WORK/payload" .
 python3 "$HERE/build_server.py" "$WORK/serve" "$WORK/port" &
 SERVER=$!
 QPID=""
@@ -160,7 +162,7 @@ if [ "$ARCH" = amd64 ]; then
     { echo "SHA256($NAME.ovf)= $(sha256 "$NAME.ovf")"
       echo "SHA256($NAME-disk1.vmdk)= $(sha256 "$NAME-disk1.vmdk")"; } > "$NAME.mf"
     # OVA = tar with the descriptor first
-    tar --format=ustar -cf "$OUT/$NAME.ova" "$NAME.ovf" "$NAME.mf" "$NAME-disk1.vmdk" )
+    COPYFILE_DISABLE=1 tar --format=ustar -cf "$OUT/$NAME.ova" "$NAME.ovf" "$NAME.mf" "$NAME-disk1.vmdk" )
   files+=("$NAME.vmdk" "$NAME.ova")
 fi
 ( cd "$OUT"

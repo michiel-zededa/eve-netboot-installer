@@ -78,8 +78,9 @@ and the UI type check + build.
   `grub_include.cfg` (`build_boot_args`). When EVE changes those files, add the
   new release as a fixture and a test.
 - Every installer ISO, `k` included, sets `eve_flavor kvm` in
-  `grub_include.cfg`, so the ISO cannot tell the variant; for local ISOs the
-  variant comes from the file name.
+  `grub_include.cfg`. For local ISOs version and variant come from
+  `/etc/eve-release` in the ISO's `rootfs_installer.img` (squashfs, read with
+  `unsquashfs`); the file name is only the fallback.
 - Keep env var names and the `DATA_DIR` layout backward compatible: existing
   installations update with a `git pull` or a new image.
 - Naming: `ENI_*` = EVE-Netboot-Installer itself; `EVE_*` = about EVE-OS

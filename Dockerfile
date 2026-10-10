@@ -30,7 +30,7 @@ RUN npm run build
 FROM python:3.13-alpine
 ARG ENI_VERSION=dev
 ENV ENI_VERSION=$ENI_VERSION
-RUN apk add --no-cache libarchive-tools tftp-hpa nginx \
+RUN apk add --no-cache libarchive-tools squashfs-tools tftp-hpa nginx \
  && rm -f /etc/nginx/http.d/default.conf
 COPY --from=ipxe /out/ /opt/ipxe/
 COPY app/ /app/

@@ -246,7 +246,7 @@ ssh_authorized_keys:
 For a VM you cannot see the screen of (headless):
 
 1. Find the VM's address in your DHCP server or hypervisor.
-2. Open `https://<VM address>:8443/`. The browser warns once about the certificate: the VM makes its own (self-signed) certificate. Accept it to continue.
+2. Open `https://<VM address>:8443/` (type `https://`). The browser warns once about the certificate: the VM makes its own (self-signed) certificate. Accept it to continue: in Safari *Show Details → visit this website*, in Chrome *Advanced → Proceed*. An address typed without `https://` is sent on to it.
 3. The same steps as on the screen follow. The first page asks for the language (the page switches right away); then admin password, network, server address, what to mirror, installer defaults and SMB share. Or start from the settings of another VM: the address its console shows under *Export settings*, or the exported settings file (*Backup and restore → Export → Download* on the other VM).
 4. After **Apply and start** you are logged in to the [web management](#6-daily-use).
 
@@ -319,8 +319,8 @@ a minute, for example controller-specific builds.
 - **Web browser:** *Images → Upload ISO* in the web management (`https://<VM address>:8443/`).
 - **scp:** `scp my-installer.iso admin@<VM address>:/srv/eve-netboot/import/`
 
-Put `k` or `kubevirt` as a separate word in the file name of a `k` ISO (for
-example `eve-k-amd64.iso`). Deleting or replacing the file updates the menu.
+The EVE-OS version and variant are read from the ISO itself; the file name
+does not matter. Deleting or replacing the file updates the menu.
 
 ---
 

@@ -32,6 +32,7 @@ import fcntl
 import hashlib
 import hmac
 import ipaddress
+import itertools
 import json
 import os
 import re
@@ -841,7 +842,8 @@ def status_lines():
     if info["configured"]:
         services = "  ".join(f"{x} {info['services'].get(x, 'missing')}" for x in ("sync", "tftp", "web"))
         L += [f"{tr('adm_st_dhcp'):<18} next-server {info['server_ip']}",
-              f"{'':<18} {tr('adm_st_boot_file')} eve-x86_64.efi (x86_64 UEFI), eve-arm64.efi (arm64 UEFI)",
+              f"{'':<18} {tr('adm_st_boot_file')} eve-x86_64.efi (x86_64 UEFI)",
+              f"{'':<18} {tr('adm_st_boot_file')} eve-arm64.efi (arm64 UEFI)",
               f"{tr('adm_st_services'):<18} {services}",
               f"{tr('adm_st_installers'):<18} " + tr("adm_st_installers_value", n=info["ready"],
                                                       date=info["github_checked"] or "-"),
@@ -968,7 +970,9 @@ def fetch_import(url):
 # lines, the selection inverted. Texts in ENI_LANGUAGE (see tr()).
 NEWT_COLORS = " ".join([
     "root=lightgray,black", "roottext=lightgray,black", "border=lightgray,black", "window=lightgray,black",
-    "shadow=black,black", "title=white,black", "button=lightgray,black", "actbutton=black,lightgray",
+    # whiptail's <OK> buttons are compact buttons: "compactbutton" when not
+    # selected, "button" when selected (so that one is inverted)
+    "shadow=black,black", "title=white,black", "button=black,lightgray", "actbutton=black,lightgray",
     "compactbutton=lightgray,black", "checkbox=lightgray,black", "actcheckbox=black,lightgray",
     "entry=black,lightgray", "disentry=gray,black", "label=lightgray,black", "listbox=lightgray,black",
     "actlistbox=black,lightgray", "sellistbox=lightgray,black", "actsellistbox=black,lightgray",
@@ -979,9 +983,9 @@ NEWT_COLORS = " ".join([
 # functional colour per dialog, as in the EVE monitor: red for errors and for
 # questions that stop the server, orange for warnings, green for success
 DIALOG_TONES = {
-    "err": "border=red,black title=brightred,black actbutton=black,red",
-    "warn": "border=brown,black title=yellow,black",
-    "ok": "border=green,black title=brightgreen,black actbutton=black,green",
+    "err": "border=red,black title=brightred,black button=black,red",
+    "warn": "border=brown,black title=yellow,black button=black,brown",
+    "ok": "border=green,black title=brightgreen,black button=black,green",
 }
 
 
@@ -1678,6 +1682,8 @@ def dashboard(tab, info, cols, lines_):
         rows_ = []
         for e in entries:
             name = (e.get("tag") or "") if e.get("source") == "github" else (e.get("name") or e.get("file") or "")
+            if e.get("source") == "local" and e.get("release"):
+                name = f"{e['release']}  {name}"      # the EVE-OS version from the ISO, then its file
             src = "GitHub" if e.get("source") == "github" else tr("src_local")
             state, tone = entry_state(e, info.get("activity"))
             rows_.append((name, e.get("arch") or "?", e.get("variant") or "", src, state, tone))
@@ -1785,9 +1791,27 @@ def status_screen():
         sys.stdout.flush()
 
 
+def console_keys():
+    """Alt + left/right are plain arrow keys (switching tabs, as on EVE-OS's
+    console) instead of switching to another virtual console, where a Linux
+    login waits; Alt+F1..F6 still switch consoles."""
+    lines = []
+    for alt in ("alt", "altgr"):
+        for n in range(4):
+            for mods in itertools.combinations(("shiftl", "shiftr", "ctrll"), n):
+                lines += [" ".join([alt, *mods, f"keycode {code} = {key}"]) for code, key in ((105, "Left"), (106, "Right"))]
+    path = "/run/eve-netboot-arrows.kmap"
+    try:
+        write(path, "\n".join(lines) + "\n")
+        run(["loadkeys", path], check=False, quiet=True)
+    except OSError:
+        pass
+
+
 def console():
     """tty1: wizard until set up, then the status screen and a login to the menu."""
     os.environ.setdefault("TERM", "linux")
+    console_keys()
     # settings from cloud-init are applied by "eve-netboot boot": wait for it, or
     # the wizard would start on a VM that is about to be set up
     started = time.time()

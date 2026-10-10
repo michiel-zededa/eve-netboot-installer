@@ -1,5 +1,6 @@
 
- EVE Netboot Installer appliance (\n) - \4
+ EVE Netboot Installer (\n) - \4
 
- Status and setup: on the VM screen (console), or log in as "admin".
+ This is a Linux login. The status screen is on console 1: press Alt+F1.
+ Log in as "admin" for the menu (the same one as on the status screen).
 

@@ -407,6 +407,59 @@ class OldNamesTest(unittest.TestCase):
             self.assertEqual(eve_sync.legacy_names(), ["EVE_LANGUAGE", "EVE_MENU_MODE", "EVE_SYNC_INTERVAL"])
 
 
+class LocalImportTest(unittest.TestCase):
+    """The version and variant of a local ISO come from its /etc/eve-release."""
+
+    def setUp(self):
+        self.imp = tempfile.mkdtemp()
+        self.loc = tempfile.mkdtemp()
+        self.iso = os.path.join(self.imp, "eve-kvm-amd64.iso")      # the name says kvm ...
+        with open(self.iso, "wb") as f:
+            f.write(b"x" * 100)
+        self.calls = []
+
+        def prepare_dir(src, dest, arch_hint, flavour_hint, extra, move=False):
+            self.calls.append(extra)
+            os.makedirs(dest, exist_ok=True)
+            meta = {"arch": "amd64", "netboot_ok": True, **extra}
+            with open(os.path.join(dest, "meta.json"), "w") as f:
+                json.dump(meta, f)
+            return meta
+
+        self.release = mock.Mock(return_value=("17.0.0-lts", "k", "amd64"))  # ... the ISO says k
+        p = mock.patch.multiple(eve_sync, IMPORT_DIR=self.imp, LOC_ROOT=self.loc, prepare_dir=prepare_dir,
+                                iso_release=self.release, is_eve_iso=lambda path: True,
+                                write_activity=mock.DEFAULT, log=mock.DEFAULT)
+        p.start()
+        self.addCleanup(p.stop)
+        q = mock.patch.object(eve_sync.time, "sleep", lambda s: None)
+        q.start()
+        self.addCleanup(q.stop)
+
+    def meta(self):
+        with open(os.path.join(self.loc, "eve-kvm-amd64", "meta.json")) as f:
+            return json.load(f)
+
+    def test_new_import(self):
+        self.assertTrue(eve_sync.sync_local())
+        self.assertEqual((self.calls[0]["release"], self.calls[0]["variant"]), ("17.0.0-lts", "k"))
+        self.assertFalse(eve_sync.sync_local())        # nothing new
+        self.assertEqual(self.release.call_count, 1)
+
+    def test_imported_before_gets_its_version_once(self):
+        eve_sync.sync_local()
+        meta = self.meta()
+        for k in ("release", "release_checked"):
+            meta.pop(k)
+        meta["variant"] = "kvm"
+        with open(os.path.join(self.loc, "eve-kvm-amd64", "meta.json"), "w") as f:
+            json.dump(meta, f)
+        self.assertTrue(eve_sync.sync_local())
+        self.assertEqual((self.meta()["release"], self.meta()["variant"]), ("17.0.0-lts", "k"))
+        self.assertFalse(eve_sync.sync_local())
+        self.assertEqual(self.release.call_count, 2)    # import + the one backfill
+
+
 class HelpersTest(unittest.TestCase):
 
     def test_is_eve_iso(self):
@@ -429,6 +482,15 @@ class HelpersTest(unittest.TestCase):
         eve_sync.chmod_readable(d)
         self.assertEqual(os.stat(f).st_mode & 0o777, 0o644)
         self.assertEqual(os.stat(os.path.join(d, "sub")).st_mode & 0o777, 0o755)
+
+    def test_release_of_an_installer_iso(self):
+        # /etc/eve-release in rootfs_installer.img; it tells kvm and k apart
+        self.assertEqual(eve_sync.parse_release("17.0.0-lts-kvm-amd64\n"), ("17.0.0-lts", "kvm", "amd64"))
+        self.assertEqual(eve_sync.parse_release("16.0.2-lts-k-arm64"), ("16.0.2-lts", "k", "arm64"))
+        self.assertEqual(eve_sync.parse_release("0.0.0-master-20260101-k-amd64"),
+                         ("0.0.0-master-20260101", "k", "amd64"))
+        for bad in ("", "garbage", "17.0.0-lts-kvm-sparc", "lts-kvm-amd64"):
+            self.assertIsNone(eve_sync.parse_release(bad), bad)
 
     def test_ascii_transliteration(self):
         with mock.patch.object(eve_sync, "LANGUAGE", "de"):

@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, CloudDownload, ExternalLink, FolderInput, Layers, S
 import { ApiError, api, uploadIso } from "../admin";
 import { Confirm, errorText, useToast } from "../forms";
 import {
-  formatSize, imageDate, imageName, imageState, type Activity, type Entry, type Status,
+  formatSize, imageDate, imageFile, imageName, imageState, type Activity, type Entry, type Status,
 } from "../api";
 import { href } from "../App";
 import { Drawer, Empty, KeyValues, PageHeader, Pill, StatePill } from "../components";
@@ -60,7 +60,7 @@ export default function Images({ status, activity, tab, search, onSearch, admin,
       (tab === "all" || e.source === tab) &&
       (!arch || e.arch === arch) &&
       (!variant || e.variant === variant) &&
-      (!q || [imageName(e), e.arch, e.variant, e.source, e.error].join(" ").toLowerCase().includes(q)));
+      (!q || [imageName(e), e.file, e.arch, e.variant, e.source, e.error].join(" ").toLowerCase().includes(q)));
     const val = (e: Entry): string | number => {
       switch (sort.key) {
         case "name": return imageName(e).toLowerCase();
@@ -183,7 +183,10 @@ export default function Images({ status, activity, tab, search, onSearch, admin,
                   <td>
                     <span className="name-cell">
                       <span className="row-icon">{e.source === "github" ? <CloudDownload size={16} /> : <FolderInput size={16} />}</span>
-                      <span className="link">{imageName(e)}</span>
+                      <span className="name-text">
+                        <span className="link">{imageName(e)}</span>
+                        {imageFile(e) && <span className="muted small file-name">{imageFile(e)}</span>}
+                      </span>
                     </span>
                   </td>
                   <td>{e.source === "github" ? "GitHub" : t("ui_src_local")}</td>

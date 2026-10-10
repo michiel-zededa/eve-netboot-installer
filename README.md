@@ -238,7 +238,7 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 - **Detection:** it is recognised by its volume id `EVEISO`; other ISOs in the same folder are ignored.
 - **When it appears:** in the menu within about a minute.
 - **Changes:** replacing or deleting the file updates the menu as well.
-- **Variant:** the variant is derived from the file name: a `k` or `kubevirt` token (for example `installer.k.iso`) means `k`, anything else `kvm`.
+- **Version and variant:** read from the ISO itself (`/etc/eve-release` in its installer root file system), so the menu and the UI show the EVE-OS version instead of only the file name. If that cannot be read, the file name decides: a `k` or `kubevirt` token (for example `installer.k.iso`) means `k`, anything else `kvm`.
 
 ## Operation
 

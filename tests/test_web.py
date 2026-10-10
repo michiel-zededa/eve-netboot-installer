@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import socket
+import ssl
 import tarfile
 import tempfile
 import threading
@@ -428,6 +429,28 @@ class CertificateTest(unittest.TestCase):
         days = (datetime.datetime.strptime(end, "%b %d %H:%M:%S %Y %Z") - datetime.datetime.utcnow()).days
         self.assertLessEqual(days, 825)
         self.assertEqual(os.stat(key).st_mode & 0o777, 0o600)
+
+    def test_plain_http_on_the_https_port_is_redirected(self):
+        # an address typed without https:// (Safari even falls back to http by itself)
+        cert, key = web.ensure_certificate(core)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+        with mock.patch.object(core, "is_configured", lambda: True), \
+                mock.patch.object(core, "load_settings", lambda: {}):
+            web.Handler.app = web.App(core)
+            server = web.TLSServer(("127.0.0.1", 0), web.Handler, ctx)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            port = server.server_address[1]
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request("GET", "/#/settings", headers={"Host": f"192.0.2.50:{port}"})
+            r = conn.getresponse()
+            self.assertEqual((r.status, r.getheader("Location")), (301, f"https://192.0.2.50:{port}/#/settings"))
+            conn = http.client.HTTPSConnection("127.0.0.1", port, timeout=10,
+                                               context=ssl._create_unverified_context())
+            conn.request("GET", "/api/session")
+            self.assertEqual(conn.getresponse().status, 200)
 
     def test_kept_while_valid_and_replaced_when_not(self):
         cert, _ = web.ensure_certificate(core)

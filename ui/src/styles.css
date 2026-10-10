@@ -293,6 +293,8 @@ select {
 .table tbody tr:last-child td { border-bottom: 0; }
 .table td.num { font-variant-numeric: tabular-nums; }
 .name-cell { display: inline-flex; align-items: center; gap: 12px; }
+.name-text { display: inline-flex; flex-direction: column; gap: 2px; }
+.file-name { font-family: var(--mono); font-size: 12px; }
 .row-icon {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
   border-radius: 8px; background: var(--accent-soft); color: var(--accent-text);

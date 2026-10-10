@@ -23,6 +23,7 @@ export interface Entry {
   args?: string | null;
   console?: string | null;
   label?: string | null;
+  release?: string | null;   // local ISOs: the EVE-OS version from the ISO itself
 }
 
 export interface Config {
@@ -82,7 +83,12 @@ export function imageState(e: Entry): ImageState {
 }
 
 export function imageName(e: Entry): string {
-  return (e.source === "github" ? e.tag : e.file || e.name) || e.path;
+  return (e.source === "github" ? e.tag : e.release || e.file || e.name) || e.path;
+}
+
+/** The file name of a local ISO when its name shows the version instead. */
+export function imageFile(e: Entry): string {
+  return e.source === "local" && e.release ? e.file || e.name || "" : "";
 }
 
 export function imageDate(e: Entry): string {
