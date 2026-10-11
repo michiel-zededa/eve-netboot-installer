@@ -216,17 +216,23 @@ Apply changes with `docker compose up -d`. The menu is regenerated on every star
 
 ## DHCP
 
-Two options are enough:
+A machine that network boots needs two boot settings from DHCP, next to its
+IP address:
 
 | Option | Value |
 |---|---|
 | 66 / next-server | `SERVER_IP` |
 | 67 / boot file | `eve-x86_64.efi` (x86_64 UEFI) or `eve-arm64.efi` (arm64 UEFI) |
 
-[docs/dhcp.md](docs/dhcp.md) has examples for:
+Set them on your DHCP server, or let something else add them without touching
+your DHCP server: the [VM appliance](vm/README.md#5b-or-let-the-vm-answer-dhcp-itself)
+can do this as **proxyDHCP**. The machine then hears both servers: the IP
+address, gateway and DNS still come from your DHCP server, the VM only adds
+the boot settings. The VM can also be the DHCP server of a network that has
+none. [docs/dhcp.md](docs/dhcp.md) explains the three ways and has examples for:
 
 - UniFi;
-- dnsmasq;
+- dnsmasq (also as proxyDHCP on any host);
 - ISC dhcpd and Kea;
 - OPNsense/pfSense;
 - MikroTik, including per-architecture boot files.

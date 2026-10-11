@@ -24,7 +24,7 @@ Collect these four answers first. You need them in the configuration.
 | 1 | Which IP address do the PXE clients use to reach this host? | `hostname -I` or `ip -4 route get 1.1.1.1` (the address after `src`) | `192.168.1.10` |
 | 2 | Is UDP port 69 (TFTP) free? | `sudo ss -lunp \| grep ':69 '` prints nothing | free |
 | 3 | Is TCP port 8080 (HTTP) free? | `sudo ss -ltnp \| grep ':8080 '` prints nothing | free, otherwise pick another port |
-| 4 | Can you change your DHCP server's *next-server* and *boot file name*? | Router or DHCP server settings | yes |
+| 4 | Can you change your DHCP server's *next-server* and *boot file name*? | Router or DHCP server settings | yes; if not, use proxyDHCP ([dhcp.md](dhcp.md#how-proxydhcp-works)) |
 
 Also check:
 
@@ -311,6 +311,12 @@ dhcp-boot=tag:efi-arm64,eve-arm64.efi,,192.168.1.10
 
 [dhcp.md](dhcp.md) has the settings for UniFi, ISC dhcpd, Kea,
 OPNsense/pfSense and MikroTik.
+
+**Cannot or do not want to change your DHCP server?** Use proxyDHCP: a second
+server in the same network adds only the boot settings, while the addresses
+keep coming from your DHCP server. The VM appliance has it built in (*DHCP
+service → Proxy*); on any Linux host dnsmasq can do it. See
+[dhcp.md: how proxyDHCP works](dhcp.md#how-proxydhcp-works).
 
 If you only have x86_64 machines, `eve-x86_64.efi` for everyone is fine.
 

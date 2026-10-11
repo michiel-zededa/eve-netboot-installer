@@ -3,7 +3,9 @@
 ## Boot chain
 
 1. **DHCP** – the client gets an address plus *next-server* (this host) and the
-   boot file `eve-x86_64.efi` (or `eve-arm64.efi`).
+   boot file `eve-x86_64.efi` (or `eve-arm64.efi`). With proxyDHCP the
+   address comes from the LAN's DHCP server and the boot settings from a
+   second answer of the proxy (see [dhcp.md](dhcp.md#how-proxydhcp-works)).
 2. **TFTP: iPXE** – the firmware loads the iPXE binary. Its embedded script
    ([docker/embed.ipxe](../docker/embed.ipxe)) is generic: it runs DHCP again
    and chains `tftp://<next-server>/boot.ipxe`.

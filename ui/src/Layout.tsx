@@ -24,6 +24,7 @@ interface Props {
 export default function Layout({ route, status, search, onSearch, onRefresh, session, onLogout, children }: Props) {
   const t = useT();
   const [navOpen, setNavOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Ctrl/Cmd+K focuses the search, like the ZEDEDA UI
@@ -31,6 +32,7 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        setSearching(true);
         searchRef.current?.focus();
       }
     };
@@ -45,7 +47,7 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
 
   return (
     <div className="shell">
-      <header className="topbar">
+      <header className={`topbar${searching ? " searching" : ""}`}>
         <button className="icon-btn nav-toggle" aria-label={t("adm_menu")} onClick={() => setNavOpen(!navOpen)}>
           {navOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
@@ -60,9 +62,14 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
             value={search}
             placeholder={t("ui_search")}
             onChange={(e) => onSearch(e.target.value)}
+            onBlur={() => { if (!search) setSearching(false); }}
           />
           <kbd>{isMac ? "⌘K" : "Ctrl K"}</kbd>
         </label>
+        <button className="icon-btn search-toggle" aria-label={t("ui_search")}
+          onClick={() => { setSearching(true); setTimeout(() => searchRef.current?.focus()); }}>
+          <Search size={19} />
+        </button>
         <div className="top-actions">
           {!session && status?.config.admin_url && (
             <a className="btn slim manage" href={status.config.admin_url}>

@@ -257,8 +257,15 @@ For a VM you cannot see the screen of (headless):
 
 ## 5. Point DHCP at the VM
 
-Two ways: change the DHCP server of the LAN once (5A), or let the VM answer
-the network boot requests itself (5B).
+A machine that network boots gets its IP address from DHCP, plus two boot
+settings: the VM's address and a boot file name. Choose who hands out the
+boot settings:
+
+| Choice | Addresses come from | Boot settings come from | Change on your DHCP server |
+|---|---|---|---|
+| [5A. Two options on your DHCP server](#5a-set-two-options-on-your-dhcp-server) | your DHCP server | your DHCP server | add two options |
+| [5B. The VM as proxyDHCP](#5b-or-let-the-vm-answer-dhcp-itself) (recommended when you cannot or do not want to change your DHCP server) | your DHCP server | the VM | nothing |
+| [5B. The VM as DHCP server](#5b-or-let-the-vm-answer-dhcp-itself) (only for a network without another DHCP server) | the VM | the VM | there must be none |
 
 ### 5A. Set two options on your DHCP server
 
@@ -281,8 +288,26 @@ It is off by default.
 
 | Mode | What it does | When |
 |---|---|---|
-| **Proxy** | Answers only the network boot requests (proxyDHCP): which boot file, from which server. The DHCP server of the LAN keeps handing out the addresses and needs no change. | A LAN with a router or DHCP server you cannot or do not want to change. Recommended. |
+| **Proxy** (proxyDHCP) | Adds only the boot settings. Your DHCP server keeps handing out the addresses, gateway and DNS, and needs no change. | A LAN with a router or DHCP server you cannot or do not want to change. Recommended. |
 | **Server** | All of DHCP: addresses, gateway, DNS and the boot settings. | A network of its own for installing machines, without another DHCP server. Needs a fixed address for the VM (*Network → Fixed address*). |
+
+**How proxy works:** a machine that network boots asks for an address with a
+broadcast, and both your DHCP server and the VM hear it. Your DHCP server
+answers as for any device, with the IP address, gateway, DNS servers and
+lease time. The VM answers the same request without an address, only with
+"boot from me, with this boot file". The machine combines the two: it takes
+its address from your DHCP server and its boot file from the VM. The VM never
+hands out addresses and only answers machines that network boot, so it is
+safe next to any DHCP server and the rest of the network does not notice it.
+[docs/dhcp.md](../docs/dhcp.md#how-proxydhcp-works) shows it step by step.
+
+With proxy:
+
+- Put the VM in the **same network (VLAN)** as the machines, so it hears their
+  broadcasts.
+- **Remove next-server and boot file name** (options 66/67) from your DHCP
+  server if you set them before: many machines prefer those over the proxy.
+- A firewall in the hypervisor must allow UDP 67, 69 and 4011 to the VM.
 
 The other settings may stay empty: they then follow the VM's own network.
 
@@ -293,7 +318,7 @@ The other settings may stay empty: they then follow the VM's own network.
 | Gateway, DNS servers (server) | the VM's own; `none` hands out none |
 | Lease time (server) | 12 hours |
 
-- **Never run two DHCP servers in one network:** machines get wrong addresses. Next to a router, use *Proxy*.
+- **Server mode: never next to another DHCP server.** Two servers handing out addresses in one network give machines wrong addresses. Next to a router, use *Proxy*.
 - **Check it:** the status screen shows the DHCP service and, in server mode, the number of leases; *Logs → DHCP* shows every request and the current leases.
 - **Boot files** are chosen per machine: x86_64 UEFI gets `eve-x86_64.efi`, arm64 UEFI `eve-arm64.efi`.
 

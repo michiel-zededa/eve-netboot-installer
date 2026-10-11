@@ -55,8 +55,10 @@ eve_netboot:
   # SMB_PASSWORD: Another-Password-1
 
   # ----------------------------------------------------- DHCP service --
-  # off | proxy (next to the network's DHCP server) | server (isolated network,
-  # needs NET_MODE: static); see eve-netboot.env. Empty settings follow the VM.
+  # off | proxy (only the boot settings; addresses keep coming from the
+  # network's DHCP server) | server (also addresses, for a network without a
+  # DHCP server; needs NET_MODE: static); see eve-netboot.env. Empty settings
+  # follow the VM.
   DHCP_MODE: "off"
   # DHCP_INTERFACE: enp0s1
   # DHCP_RANGE_START: 192.168.1.100
