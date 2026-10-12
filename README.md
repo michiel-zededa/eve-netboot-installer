@@ -9,10 +9,14 @@
 [![Tests](https://github.com/michiel-zededa/eve-netboot-installer/actions/workflows/test.yml/badge.svg)](https://github.com/michiel-zededa/eve-netboot-installer/actions/workflows/test.yml)
 ![Platforms](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-informational)
 ![Docker Compose](https://img.shields.io/badge/runs%20on-Docker%20Compose-2496ED?logo=docker&logoColor=white)
+![VM appliance](https://img.shields.io/badge/VM%20appliance-qcow2%20%7C%20OVA%20%7C%20VMDK-6f42c1)
 
 </div>
 
-EVE Netboot Installer is a self-contained PXE boot server for EVE-OS. It runs as a small Docker Compose stack on any Linux host, NAS or VM, including a VM on an EVE edge node.
+EVE Netboot Installer is a self-contained PXE boot server for EVE-OS. Run it in one of two ways:
+
+- **Ready-made VM appliance** (qcow2, OVA, VMDK) for any hypervisor, including ZEDEDA / EVE-OS, Proxmox, KVM and VMware. Set it up on its screen, in a browser or through cloud-init; no Linux knowledge needed. See [vm/README.md](vm/README.md).
+- **Docker Compose stack** on any Linux host or NAS. See [docs/deployment.md](docs/deployment.md).
 
 What it does:
 
@@ -119,24 +123,24 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
 ## Requirements
 
-**Host**
+**VM appliance**
+
+- A hypervisor that runs qcow2 (KVM, Proxmox, libvirt, ZEDEDA / EVE-OS, amd64 or arm64) or OVA/VMDK (VMware).
+- 1 vCPU and 1 GB RAM at least (2 and 2 GB recommended), a 16 GB disk (32 GB for more releases and ISOs).
+- A bridged network in the same layer-2 network (VLAN) as the machines to install, not NAT.
+- Details: [vm/README.md: what the VM needs](vm/README.md#2-what-the-vm-needs).
+
+**Docker Compose host**
 
 - Linux with Docker Engine and the Compose plugin (v2), on amd64 or arm64.
 - The TFTP service uses host networking, so Docker Desktop on macOS/Windows is not suitable.
+- Ports UDP 69 (TFTP) and TCP 8080 (HTTP, configurable).
 
-**Ports**
+**Both**
 
-- UDP 69 (TFTP).
-- TCP 8080 (HTTP, configurable).
-
-**Disk**
-
-- About 0.5 GB per mirrored `kvm` variant and 0.7 GB per `k` variant.
-- The defaults (3 LTS lines, amd64 `kvm`) need about 2 GB.
-
-**DHCP**
-
-- A server on which you can set *next-server* (option 66) and the *boot file name* (option 67).
+- **Disk:** about 0.5 GB per mirrored `kvm` variant and 0.7 GB per `k` variant; the defaults (3 LTS lines, amd64 `kvm`) need about 2 GB.
+- **Internet:** outbound HTTPS to GitHub for the EVE-OS releases.
+- **DHCP:** a DHCP server on which you can set *next-server* (option 66) and the *boot file name* (option 67). With the VM appliance that is not needed: it can add those itself as proxyDHCP (see [DHCP](#dhcp)).
 
 **Targets**
 
@@ -144,6 +148,18 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 - RAM: the whole installer ISO is loaded into memory, so plan for at least 2 GB (`kvm`) or 8 GB (`k`).
 
 ## Quick start
+
+### VM appliance
+
+1. **Download** the image for your hypervisor from the [latest release](https://github.com/michiel-zededa/eve-netboot-installer/releases/latest): `eve-netboot-<version>-amd64.qcow2` (or `-arm64.qcow2`, `-amd64.ova`, `-amd64.vmdk`).
+2. **Create the VM** on a bridged network ([ZEDEDA, Proxmox, libvirt, VMware](vm/README.md#3-create-the-vm)) and start it.
+3. **Set it up** on the VM's screen, in a browser at `https://<VM address>:8443/`, or through cloud-init: language, network, admin password.
+4. **DHCP:** turn on *DHCP service → Proxy* in the VM, or set next-server and the boot file on your DHCP server (see [DHCP](#dhcp)).
+5. **Boot a machine:** network boot it, pick a release, review the options and press **`i`**.
+
+**[vm/README.md](vm/README.md)** is the full guide: setup, the console and web management, your own ISOs, updates and replacing the VM.
+
+### Docker Compose
 
 The fastest way, with the prebuilt image. **[docs/deployment.md](docs/deployment.md)** is the full step-by-step guide, with checks after every step and example settings.
 
@@ -188,7 +204,7 @@ To build the image yourself instead, clone the repository, leave `ENI_IMAGE` emp
 
 ## Configuration
 
-Everything is configured in `.env`; [.env.example](.env.example) documents every option.
+Everything is configured in `.env`; [.env.example](.env.example) documents every option. On the VM appliance you change the same settings in its console menu or web management (or pass them through cloud-init); see [vm/README.md: all settings](vm/README.md#10-all-settings).
 
 - **`ENI_*`:** EVE Netboot Installer itself: image, language, boot menu, sync intervals, GitHub token.
 - **`EVE_*`:** EVE-OS: which releases are mirrored (`EVE_ARCHES`, `EVE_FLAVOURS`, `EVE_LTS_LINES`, `EVE_GITHUB_REPO`) and, as `EVE_DEFAULT_*`, the defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
@@ -239,7 +255,7 @@ none. [docs/dhcp.md](docs/dhcp.md) explains the three ways and has examples for:
 
 ## Your own installer ISOs
 
-Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DIR`.
+Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DIR`. On the VM appliance, upload it in the web management or copy it to its SMB share ([vm/README.md](vm/README.md#7-your-own-installer-isos)).
 
 - **Detection:** it is recognised by its volume id `EVEISO`; other ISOs in the same folder are ignored.
 - **When it appears:** in the menu within about a minute.
@@ -247,6 +263,8 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 - **Version and variant:** read from the ISO itself (`/etc/eve-release` in its installer root file system), so the menu and the UI show the EVE-OS version instead of only the file name. If that cannot be read, the file name decides: a `k` or `kubevirt` token (for example `installer.k.iso`) means `k`, anything else `kvm`.
 
 ## Operation
+
+On the VM appliance all of this is in its console menu and web management: logs, *Check GitHub now*, *Update EVE Netboot Installer* (with rollback) and automatic security updates ([vm/README.md: daily use](vm/README.md#6-daily-use)). With Docker Compose:
 
 | Task | Command |
 |---|---|
