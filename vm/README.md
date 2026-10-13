@@ -102,7 +102,36 @@ The names of buttons differ between ZEDEDA releases; look for the closest match.
    - one network interface;
    - **Custom configuration (cloud-init):** paste your settings, see [step 4B](#4b-through-cloud-init). Leave it empty to set the VM up on its screen instead.
 4. **Deploy** an instance of the Edge App to the node and attach its interface to the Switch network instance.
+   - **Firewall rules:** add one **outbound** rule that allows **any protocol and port** to `0.0.0.0/0`. See [firewall rules on EVE-OS](#firewall-rules-on-eve-os) below.
 5. Without cloud-init settings: open the instance's **remote console** and continue with [step 4A](#4a-on-the-vm-screen).
+
+#### Firewall rules on EVE-OS
+
+EVE-OS drops all traffic of an app by default. The only exceptions are its own
+DNS, DHCP (as a client) and metadata services
+([EVE-OS network ACLs](https://github.com/lf-edge/eve/blob/master/docs/NETWORK-ACLS.md)).
+On a **Switch** network instance the rules work in both directions, so a single
+outbound rule *allow any protocol and port to `0.0.0.0/0`* also lets the
+machines in the LAN reach the VM. That one rule is the recommended setup.
+
+Separate rules per port do not work well. TFTP sends each file from a random
+high UDP port, and EVE-OS does not track TFTP connections, so that would need
+every UDP port from 1024 to 65535. ZEDEDA only accepts single ports, not
+ranges. For reference, the VM uses:
+
+| Direction | Port | For |
+|---|---|---|
+| in | UDP 69 and random high UDP ports | TFTP: the iPXE binary and `boot.ipxe` |
+| in | TCP 8080 | boot menu, kernel, initrd and installer ISO; public web UI |
+| in | TCP 8443 | web management |
+| in | UDP 67 and 4011 | DHCP service (only when it is on) |
+| in | TCP 445 | SMB share (only when it is on) |
+| in | TCP 22 | SSH (only when you use it) |
+| out | TCP 443 and 80 | GitHub releases, image and Debian updates |
+| out | UDP 123 | time synchronisation |
+
+The VM has its own logins for the web management and SSH, and it sits in your
+own LAN, so opening it to that LAN is the normal setup for a boot server.
 
 The `KEY=VALUE` format works well with variables in the custom configuration: put a variable where a value goes (for example for `ADMIN_PASSWORD` and `EVE_DEFAULT_INSTALL_SERVER`) and fill it in per deployment.
 
@@ -307,7 +336,7 @@ With proxy:
   broadcasts.
 - **Remove next-server and boot file name** (options 66/67) from your DHCP
   server if you set them before: many machines prefer those over the proxy.
-- A firewall in the hypervisor must allow UDP 67, 69 and 4011 to the VM.
+- A firewall in the hypervisor must allow UDP 67, 4011 and TFTP (UDP 69 and the random high UDP ports TFTP replies from) to the VM. On ZEDEDA / EVE-OS: see [firewall rules on EVE-OS](#firewall-rules-on-eve-os).
 
 The other settings may stay empty: they then follow the VM's own network.
 

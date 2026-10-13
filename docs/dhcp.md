@@ -72,8 +72,10 @@ What this means in practice:
 - **No boot options on your DHCP server.** If your DHCP server already hands
   out a next-server or boot file name (options 66/67), many machines use that
   instead of the proxy's answer. Remove them when you switch to proxy.
-- **Firewall:** the VM receives UDP 67 and 4011 (proxyDHCP) and 69 (TFTP). It
-  has no firewall of its own; a firewall in the hypervisor must allow them.
+- **Firewall:** the VM receives UDP 67 and 4011 (proxyDHCP) and TFTP (UDP 69
+  and the random high UDP ports TFTP replies from). It has no firewall of its
+  own; a firewall in the hypervisor must allow them. On ZEDEDA / EVE-OS, see
+  [firewall rules on EVE-OS](../vm/README.md#firewall-rules-on-eve-os).
 - **Check it:** on the VM, *Logs → DHCP* shows every network boot request and
   the answer. No lines when a machine boots means the broadcasts do not reach
   the VM.
