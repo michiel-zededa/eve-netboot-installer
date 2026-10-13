@@ -370,6 +370,7 @@
  "adm_login_text": "Palavra-passe de {user}:",
  "adm_wrong_password": "Palavra-passe errada.",
  "adm_shell_hint": "Escreva 'exit' para voltar ao ecrã de estado, 'eve-netboot menu' para o menu.",
+ "adm_shell_hint_menu": "Escreva 'exit' para voltar ao menu.",
  "adm_starting": "A iniciar, aguarde ...",
  "adm_st_state": "Estado",
  "adm_st_not_set_up": "ainda não configurada",

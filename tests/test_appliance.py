@@ -411,3 +411,35 @@ class ReferenceExamplesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoginScriptTest(unittest.TestCase):
+    """profile.d: "Command line" opens a shell; exit returns to the menu (also over SSH)."""
+
+    def test_command_line_returns_to_the_menu(self):
+        import pty
+        import subprocess
+        script = os.path.join(HERE, "..", "vm", "rootfs", "etc", "profile.d", "eve-netboot.sh")
+        with tempfile.TemporaryDirectory() as d:
+            calls = os.path.join(d, "calls")
+            stubs = {
+                "id": "#!/bin/sh\necho admin\n",
+                # the menu: "Command line" (10) twice, then "Log out" (0)
+                "sudo": f"#!/bin/sh\necho menu >> {calls}\n"
+                        f"[ $(grep -c menu {calls}) -le 2 ] && exit 10\nexit 0\n",
+                "fakeshell": f"#!/bin/sh\necho shell \"$ENI_NO_MENU\" >> {calls}\n",
+            }
+            for name, text in stubs.items():
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(text)
+                os.chmod(os.path.join(d, name), 0o755)
+            master, slave = pty.openpty()
+            env = {"PATH": d + ":/usr/bin:/bin", "SHELL": os.path.join(d, "fakeshell")}
+            subprocess.run(["sh", "-c", f". {script}; echo after >> {calls}"],
+                           stdin=slave, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           env=env, timeout=10)
+            os.close(master)
+            os.close(slave)
+            with open(calls) as f:
+                self.assertEqual(f.read().split("\n")[:-1],
+                                 ["menu", "shell 1", "menu", "shell 1", "menu"])

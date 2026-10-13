@@ -370,6 +370,7 @@
  "adm_login_text": "Adgangskode for {user}:",
  "adm_wrong_password": "Forkert adgangskode.",
  "adm_shell_hint": "Skriv 'exit' for at gå tilbage til statusskærmen, 'eve-netboot menu' for menuen.",
+ "adm_shell_hint_menu": "Skriv 'exit' for at gå tilbage til menuen.",
  "adm_starting": "Starter, vent venligst ...",
  "adm_st_state": "Tilstand",
  "adm_st_not_set_up": "ikke konfigureret endnu",

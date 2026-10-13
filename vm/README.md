@@ -375,7 +375,8 @@ for errors and for questions that stop the server (power off), orange for
 warnings, green for success.
 
 **Over SSH:** `ssh admin@<VM address>` opens the same menu. *Command line*
-leaves it; `eve-netboot menu` brings it back.
+opens a shell; `exit` returns to the menu, and *Log out* in the menu ends the
+SSH session. On the VM's screen, `exit` returns to the status screen.
 
 | Menu item | Does |
 |---|---|

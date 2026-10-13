@@ -2102,7 +2102,10 @@ def main(argv):
     elif cmd == "console":
         console()
     elif cmd == "menu":
-        return menu()
+        rc = menu()
+        if rc == 10:   # "Command line": the login script opens a shell, exit returns here
+            print("\033[2J\033[H" + tr("adm_shell_hint_menu") + "\n", flush=True)
+        return rc
     elif cmd == "status":
         cmd_status()
     elif cmd == "apply":
