@@ -2,10 +2,10 @@
 // never kept) or a pasted session token. The appliance keeps the token in
 // memory only; after a restart or when it expires, log in again.
 import { useEffect, useState } from "react";
-import { LogIn, LogOut, TriangleAlert } from "lucide-react";
+import { Download, LogIn, LogOut, Trash2, TriangleAlert } from "lucide-react";
 import { api, type ZededaInfo } from "../admin";
 import { Card } from "../components";
-import { errorText } from "../forms";
+import { Confirm, errorText, useToast } from "../forms";
 import { useT } from "../i18n";
 
 const time = (s: number | null) => (s ? new Date(s * 1000).toLocaleString() : "?");
@@ -18,6 +18,8 @@ export default function ZededaSession() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [remove, setRemove] = useState<ZededaInfo["onboarded"][number] | null>(null);
+  const toast = useToast();
 
   const load = () => api.zededa().then(setInfo).catch((e) => setError(errorText(e)));
   useEffect(() => {
@@ -50,6 +52,16 @@ export default function ZededaSession() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const deleteNode = async (mac: string, name: string) => {
+    try {
+      await api.zededaDelete(mac);
+      toast(t("adm_zo_deleted", { name }));
+    } catch (e) {
+      toast(errorText(e), "err");
+    }
+    load();
   };
 
   if (!info) return error ? <div className="alert err">{error}</div> : null;
@@ -101,7 +113,9 @@ export default function ZededaSession() {
           </>
         )}
       </Card>
-      <Card title={t("adm_zo_onboarded")}>
+      <Card title={t("adm_zo_onboarded")} actions={info.onboarded.length > 0 && (
+        <a className="btn slim" href="api/zededa/export" download><Download size={16} /> {t("adm_zo_export_csv")}</a>
+      )}>
         {info.onboarded.length === 0 ? (
           <p className="muted">{t("adm_zo_none_yet")}</p>
         ) : (
@@ -114,6 +128,7 @@ export default function ZededaSession() {
                   <th>{t("adm_zo_col_mac")}</th>
                   <th>{t("adm_zo_col_machine")}</th>
                   <th>{t("adm_zo_col_result")}</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -124,8 +139,18 @@ export default function ZededaSession() {
                     <td className="mono">{n.mac}</td>
                     <td>{[n.product, n.hardware_serial].filter(Boolean).join(", ") || "-"}</td>
                     <td>
-                      <span className={`pill ${n.result === "failed" ? "err" : "ok"}`}>{t(`adm_zo_result_${n.result}`)}</span>
+                      <span className={`pill ${n.result === "failed" ? "err" : n.result === "deleted" ? "neutral" : "ok"}`}>
+                        {t(`adm_zo_result_${n.result}`)}
+                      </span>
                       {n.result === "failed" && <div className="small err-text">{n.message}</div>}
+                    </td>
+                    <td>
+                      {(n.result === "created" || n.result === "exists") && n.node_id && (
+                        <button className="icon-btn small" title={s ? t("adm_zo_delete") : t("adm_zo_delete_login")}
+                          aria-label={t("adm_zo_delete")} disabled={!s} onClick={() => setRemove(n)}>
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -134,6 +159,10 @@ export default function ZededaSession() {
           </div>
         )}
       </Card>
+      {remove && (
+        <Confirm title={t("adm_zo_delete")} text={t("adm_zo_delete_q", { name: remove.name })} confirm={t("adm_zo_delete")}
+          danger onConfirm={() => deleteNode(remove.mac, remove.name)} onClose={() => setRemove(null)} />
+      )}
     </>
   );
 }

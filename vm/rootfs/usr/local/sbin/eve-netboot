@@ -38,6 +38,7 @@ import os
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -60,6 +61,11 @@ IMPORT = os.path.join(DATA, "import")
 WWW = os.path.join(DATA, "www")
 LOG = "/var/log/eve-netboot.log"
 LOCK = "/run/eve-netboot.lock"
+# ZEDEDA onboarding: the machines the web management onboarded (no secrets), and
+# the key with which the console may use the web management's ZEDEDA session
+# (/run: memory only, root only, a new one at every start of the web management)
+ONBOARDED = os.path.join(ETC, "zededa-onboarded.json")
+WEB_LOCAL_KEY = "/run/eve-netboot-web.key"
 BOOT_DONE = "/run/eve-netboot.boot-done"   # written when "eve-netboot boot" has finished
 USERDATA = "/var/lib/cloud/instance/user-data.txt"
 NETWORKD = "/etc/systemd/network"
@@ -86,7 +92,7 @@ VM_KEYS = {"HOSTNAME", "NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY"
            "DHCP_MODE", "DHCP_INTERFACE", "DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS",
            "DHCP_LEASE_TIME",
            "ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT",
-           "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME"}
+           "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"}
 # applied once and never stored
 CONSUMED = {"ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "SMB_PASSWORD"}
 # not in an export (secrets)
@@ -112,6 +118,7 @@ DEFAULTS = {
     "ZEDEDA_CLUSTER": "zedcontrol.zededa.net",
     "ZEDEDA_ONBOARDING_KEY": "5d0767ee-0547-4569-b530-387e526f8cb9",
     "ZEDEDA_NODE_NAME": "eve-{mac}",
+    "ZEDEDA_NODE_NEXT": "1",
     "SERVER_IP": "auto",
     "HTTP_PORT": "8080",
     "TZ": "UTC",
@@ -371,8 +378,11 @@ def zededa_problems(s):
                         get(s, "ZEDEDA_ONBOARDING_KEY")):
         errors.append(("ZEDEDA_ONBOARDING_KEY", tr("adm_err_zededa_key")))
     name = get(s, "ZEDEDA_NODE_NAME")
-    if ("{mac}" not in name and "{serial}" not in name) or not re.fullmatch(r"[A-Za-z0-9{}._-]{1,48}", name):
+    if (not re.search(r"\{mac\}|\{serial\}|\{n(:\d)?\}", name) or len(name) > 48
+            or not re.fullmatch(r"(?:[A-Za-z0-9._-]|\{mac\}|\{serial\}|\{n(?::\d)?\})+", name)):
         errors.append(("ZEDEDA_NODE_NAME", tr("adm_err_zededa_name")))
+    if not re.fullmatch(r"[0-9]{1,9}", get(s, "ZEDEDA_NODE_NEXT")):
+        errors.append(("ZEDEDA_NODE_NEXT", tr("adm_err_zededa_next")))
     return errors
 
 
@@ -1385,7 +1395,7 @@ FIELDS = {
     "DHCP_DNS": ("text", None), "DHCP_LEASE_TIME": ("text", None),
     "ZEDEDA_ONBOARDING": ("yesno", None), "ZEDEDA_CLUSTER": ("text", None), "ZEDEDA_ENTERPRISE": ("text", None),
     "ZEDEDA_USER": ("text", None), "ZEDEDA_PROJECT": ("text", None), "ZEDEDA_ONBOARDING_KEY": ("text", None),
-    "ZEDEDA_NODE_NAME": ("text", None),
+    "ZEDEDA_NODE_NAME": ("text", None), "ZEDEDA_NODE_NEXT": ("text", None),
 }
 SECTIONS = {
     "network": ["NET_MODE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "NET_INTERFACE", "HOSTNAME"],
@@ -1401,7 +1411,7 @@ SECTIONS = {
                  "EVE_DEFAULT_NUKE_ALL_DISKS", "EVE_DEFAULT_EXTRA_ARGS"],
     "share": ["SMB_IMPORT_SHARE", "SMB_PASSWORD"],
     "zededa": ["ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT",
-               "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME"],
+               "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"],
     "access": ["WEB_ADMIN", "WEB_ADMIN_PORT", "SSH_PASSWORD_LOGIN", "ADMIN_SSH_KEYS", "TZ"],
 }
 SHOWN_IF = {
@@ -1416,6 +1426,8 @@ SHOWN_IF = {
     **{k: (lambda s: get(s, "ZEDEDA_ONBOARDING") == "yes")
        for k in ("ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT",
                  "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME")},
+    "ZEDEDA_NODE_NEXT": lambda s: (get(s, "ZEDEDA_ONBOARDING") == "yes" and
+                                   re.search(r"\{n(:\d)?\}", get(s, "ZEDEDA_NODE_NAME")) is not None),
 }
 
 
@@ -1542,6 +1554,130 @@ def screen_section(section, s):
         if errors:
             msg(title, "\n".join(errors), tone="err")
             s = old
+
+
+# ---- ZEDEDA onboarding: the settings, and the session that lives in the web management
+def web_api(method, path, body=None):
+    """The web management's API on this VM, used by the console with the key the
+    web management keeps in WEB_LOCAL_KEY (the ZEDEDA session lives in that
+    process). -> (status, answer); status 0 = the web management is not running."""
+    key = read(WEB_LOCAL_KEY).strip()
+    if not key:
+        return 0, {"error": tr("adm_zo_web_down")}
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"https://127.0.0.1:{get(load_settings(), 'WEB_ADMIN_PORT')}{path}", data=data,
+                                 method=method, headers={"X-ENI": "1", "X-ENI-Local": key, "X-ENI-Lang": language(),
+                                                         "Content-Type": "application/json"})
+    ctx = ssl.create_default_context()
+    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE      # loopback: the VM's own certificate
+    try:
+        with urllib.request.urlopen(req, timeout=90, context=ctx) as r:
+            status, raw, ctype = r.status, r.read(), r.headers.get("Content-Type", "")
+    except urllib.error.HTTPError as e:
+        status, raw, ctype = e.code, e.read(), e.headers.get("Content-Type", "")
+    except (urllib.error.URLError, OSError):
+        return 0, {"error": tr("adm_zo_web_down")}
+    if ctype.startswith("application/json"):
+        try:
+            return status, json.loads(raw)
+        except ValueError:
+            pass
+    return status, raw.decode(errors="replace")
+
+
+def zededa_until(seconds):
+    return datetime.datetime.fromtimestamp(seconds).strftime("%Y-%m-%d %H:%M") if seconds else "?"
+
+
+def screen_zededa(s):
+    """Settings, login/logout, the onboarded machines (delete) and their export.
+    Settings are applied here; returns s unchanged, so the menu applies nothing."""
+    title = tr("adm_sec_zededa")
+    while True:
+        cur = load_settings()
+        on = get(cur, "ZEDEDA_ONBOARDING") == "yes"
+        status, info = web_api("GET", "/api/zededa") if on else (0, {})
+        info = info if isinstance(info, dict) else {}
+        session = info.get("session") if status == 200 else None
+        nodes = info.get("onboarded", []) if status == 200 else []
+        if not on:
+            state = tr("adm_zo_state_off")
+        elif status != 200:
+            state = info.get("error") or tr("adm_zo_web_down")
+        elif session:
+            state = tr("adm_zo_logged_in") + " " + tr(
+                "adm_zo_session_text", user=session["user"], enterprise=session["enterprise"],
+                cluster=session["cluster"], until=zededa_until(session.get("expires")))
+        else:
+            state = tr("adm_zo_not_logged_in_ui")
+        items = [("settings", tr("adm_zo_settings"))]
+        if on and status == 200:
+            items.append(("logout", tr("adm_zo_logout")) if session else ("login", tr("adm_zo_login")))
+        if nodes:
+            items += [("nodes", f"{tr('adm_zo_onboarded')} ({len(nodes)})"), ("export", tr("adm_zo_export"))]
+        try:
+            c = choose(title, tr("adm_sec_zededa_text") + "\n\n" + state, items,
+                       cancel=tr("adm_btn_done"), ok=tr("adm_btn_open"))
+        except Cancel:
+            return s
+        try:
+            if c == "settings":
+                new = screen_section("zededa", cur)
+                if new != cur:
+                    apply_with_feedback(new)
+            elif c == "login":
+                pw = ask(title, tr("adm_zo_login_text", user=get(cur, "ZEDEDA_USER") or "-",
+                                   enterprise=get(cur, "ZEDEDA_ENTERPRISE") or "-",
+                                   cluster=get(cur, "ZEDEDA_CLUSTER")), password=True)
+                code, answer = web_api("POST", "/api/zededa/login", {"password": pw})
+                del pw
+                if code == 200:
+                    msg(title, answer.get("warning") or tr("adm_zo_logged_in"),
+                        tone="warn" if answer.get("warning") else "ok")
+                else:
+                    msg(title, answer.get("error", str(answer)) if isinstance(answer, dict) else str(answer),
+                        tone="err")
+            elif c == "logout":
+                web_api("POST", "/api/zededa/logout", {})
+            elif c == "nodes":
+                screen_zededa_nodes(title, nodes, session is not None)
+            elif c == "export":
+                code, text = web_api("GET", "/api/zededa/export")
+                if code != 200:
+                    msg(title, text.get("error", "") if isinstance(text, dict) else str(text), tone="err")
+                    continue
+                name = f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv"
+                copies = [f"/home/{ADMIN}/{name}", os.path.join(IMPORT, name)]
+                for path in copies:
+                    write(path, text)
+                    shutil.chown(path, ADMIN, ADMIN)
+                msg(title, tr("adm_zo_exported", home=copies[0],
+                              share=f"\\\\{primary_ip() or 'VM'}\\eve-import\\{name}"), tone="ok")
+        except Cancel:
+            continue
+
+
+def screen_zededa_nodes(title, nodes, logged_in):
+    """The onboarded machines; choosing one offers to delete its node in ZEDEDA."""
+    items = [(n["mac"], f"{cut(n['name'], 30):<30} {n['mac']}  {tr('adm_zo_result_' + n['result'])}")
+             for n in nodes]
+    mac = choose(title, tr("adm_zo_nodes_text"), items, cancel=tr("adm_btn_back"), ok=tr("adm_btn_open"))
+    node = next(n for n in nodes if n["mac"] == mac)
+    details = "\n".join(f"{k}: {v}" for k, v in (
+        (tr("adm_zo_col_name"), node["name"]), (tr("adm_zo_col_mac"), node["mac"]),
+        (tr("adm_zo_col_machine"), ", ".join(x for x in (node.get("product"), node.get("hardware_serial")) if x) or "-"),
+        (tr("adm_zo_col_result"), tr("adm_zo_result_" + node["result"])),
+        (tr("adm_zo_col_time"), zededa_until(node.get("time")))))
+    if node["result"] not in ("created", "exists") or not node.get("node_id"):
+        return msg(title, details + ("\n" + node["message"] if node.get("message") else ""))
+    if not logged_in:
+        return msg(title, details + "\n\n" + tr("adm_zo_delete_login"))
+    if yesno(title, details + "\n\n" + tr("adm_zo_delete_q", name=node["name"]), yes=tr("adm_zo_delete"),
+             no=tr("adm_btn_cancel"), default_no=True, tone="err"):
+        code, answer = web_api("POST", "/api/zededa/delete", {"mac": node["mac"]})
+        ok = code == 200
+        msg(title, tr("adm_zo_deleted", name=node["name"]) if ok else
+            (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if ok else "err")
 
 
 # ---- step by step, for the setup wizard (and the network, which belongs together)
@@ -1800,6 +1936,7 @@ def menu():
                 ("bootmenu", tr("adm_sec_bootmenu")),
                 ("defaults", tr("adm_sec_defaults")),
                 ("share", tr("adm_sec_share")),
+                ("zededa", tr("adm_sec_zededa")),
                 ("access", tr("adm_sec_access")),
                 ("sync", tr("adm_sync_now")),
                 ("logs", tr("adm_nav_logs")),
@@ -1819,7 +1956,8 @@ def menu():
             if c == "status":
                 msg(tr("adm_nav_status"), "\n".join(status_lines()))
             elif c in SECTIONS:
-                new = screen_network(s) if c == "network" else screen_section(c, s)
+                new = (screen_network(s) if c == "network" else screen_zededa(s) if c == "zededa"
+                       else screen_section(c, s))
                 if new != s or "SMB_PASSWORD" in new:
                     if c == "network" and os.environ.get("SSH_CONNECTION") and not yesno(
                             tr("adm_sec_network"), tr("adm_net_ssh_warning"), default_no=True, tone="warn"):

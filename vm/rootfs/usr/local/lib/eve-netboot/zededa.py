@@ -14,6 +14,7 @@ them: docs/design/zededa-onboarding.md.
 - POST /api/v1/devices/model-less    (a node without a model; EVE-OS 17+
                                       reports its hardware itself. Not in the
                                       published definitions: the ZEDEDA UI uses it)
+- DELETE /api/v1/devices/id/{id}     (delete a node this appliance created)
 """
 
 import json
@@ -152,14 +153,31 @@ class Client:
             "obkey": onboarding_key})
         return a.get("objectId", "")
 
+    def delete_device(self, node_id):
+        self.call("DELETE", "/v1/devices/id/" + urllib.parse.quote(node_id, safe=""))
 
-def node_name(template, mac, serial=""):
-    """Node name from the template: {mac} (aa-bb-cc-dd-ee-ff) and {serial} (the
-    hardware serial, the MAC when the machine has none). Lower case letters,
-    digits and hyphens only, at most 63 characters."""
+
+NUMBER_RE = re.compile(r"\{n(?::(\d))?\}")
+
+
+def uses_number(template):
+    return bool(NUMBER_RE.search(template or ""))
+
+
+def node_name(template, mac, serial="", number=None):
+    """Node name from the naming convention: {mac} (aa-bb-cc-dd-ee-ff), {serial}
+    (the hardware serial, the MAC address when the machine has none) and {n} /
+    {n:3} (a sequence number, with leading zeros to that width). Lower case
+    letters, digits and hyphens only, at most 63 characters."""
     serial = serial if usable_serial(serial) else mac
-    name = template.replace("{mac}", mac).replace("{serial}", serial).lower()
-    name = re.sub(r"[^a-z0-9-]+", "-", name).strip("-")
+    name = template.replace("{mac}", mac).replace("{serial}", serial)
+    name = NUMBER_RE.sub(lambda m: str(number if number is not None else 0).zfill(int(m.group(1) or 0)), name)
+    return clean_name(name)
+
+
+def clean_name(name):
+    """A name as ZEDEDA takes it: lower case letters, digits and hyphens, at most 63."""
+    name = re.sub(r"[^a-z0-9-]+", "-", str(name).lower()).strip("-")
     return re.sub(r"-{2,}", "-", name)[:63].strip("-")
 
 

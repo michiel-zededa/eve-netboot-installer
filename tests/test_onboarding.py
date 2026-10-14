@@ -141,6 +141,12 @@ class MenuTest(unittest.TestCase):
         self.assertIn("item --key o eve_ob_toggle ${eve_sp}Onboard in ZEDEDA: ${eve_onboard_s}  [o]", confirm)
         self.assertIn("isset ${eve_ob_s} && item --gap ZEDEDA: ${eve_ob_s} ||", confirm)
         self.assertIn("choose --default eve_menu", confirm)          # Enter alone installs nothing
+        # a name for this one machine (key n), sent with both requests
+        self.assertIn("iseq ${eve_ob_do} 1 && item --key n eve_ob_rename ${eve_sp}Node name: ${eve_ob_name_s}  [n] ||",
+                      confirm)
+        self.assertIn("read eve_ob_name", confirm)
+        self.assertEqual(m.count("&name=${eve_ob_name:uristring}"), 2)
+        self.assertIn("clear eve_ob_name", m[:m.index(":eve_detect")])  # a new machine starts without one
         self.assertIn(f"chain --autofree {url}?action=preview&mac=${{mac:hexhyp}}&serial=${{serial:uristring}}", m)
         self.assertIn(f"chain --autofree {url}?action=register&mac=${{mac:hexhyp}}", m)
         # registered only after i, before the installer is loaded
@@ -183,6 +189,26 @@ class SettingsTest(unittest.TestCase):
         keys = sorted(k for k, _ in app.zededa_problems(s))
         self.assertEqual(keys, ["ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_NODE_NAME", "ZEDEDA_ONBOARDING",
                                 "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_PROJECT", "ZEDEDA_USER"])
+
+    def test_naming_convention(self):
+        ok = {"ZEDEDA_ONBOARDING": "yes", "ZEDEDA_ENTERPRISE": "E", "ZEDEDA_USER": "u", "ZEDEDA_PROJECT": "p"}
+        for name in ("eve-{mac}", "site1-{serial}", "bench1-node-{n:3}", "n{n}"):
+            with self.subTest(name=name):
+                self.assertEqual(app.zededa_problems({**ok, "ZEDEDA_NODE_NAME": name}), [])
+        for name in ("fixed", "x-{n:12}", "a b-{n}", "{foo}-{n}", "x" * 49 + "{n}"):
+            with self.subTest(name=name):
+                self.assertEqual([k for k, _ in app.zededa_problems({**ok, "ZEDEDA_NODE_NAME": name})],
+                                 ["ZEDEDA_NODE_NAME"])
+        self.assertEqual([k for k, _ in app.zededa_problems({**ok, "ZEDEDA_NODE_NEXT": "x"})], ["ZEDEDA_NODE_NEXT"])
+        self.assertEqual(zededa.node_name("bench1-node-{n:3}", MAC, number=7), "bench1-node-007")
+        self.assertEqual(zededa.node_name("b{n}-{mac}", MAC, number=12), "b12-52-54-00-12-34-56")
+
+    def test_every_settings_group_is_in_the_console_menu(self):
+        import inspect
+        src = inspect.getsource(app.menu)
+        for section in app.SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(f'("{section}", tr("adm_sec_{section}"))', src)
 
     def test_no_password_or_token_setting(self):
         # the ZEDEDA password and session are never settings: nothing to store or export

@@ -82,6 +82,7 @@ the behaviour of the API:
 | `POST /api/v1/logout` | log out | |
 | `GET /api/v1/projects/name/{name}` | project ID and policies | not called when the project is given by its ID |
 | `GET /api/v1/devices/serial/{serialno}` | duplicate check | 404 = no such node |
+| `DELETE /api/v1/devices/id/{id}` | delete a node this appliance created | 404 = already gone |
 | `POST /api/v1/devices/model-less` | create the node | the `DeviceConfig` of `POST /api/v1/devices` without `modelId` (that call answers 400 `Invalid Model` without one). Not in the published definitions; it is the call the ZEDEDA UI uses for a node without a model, so errors are shown as the controller words them. The onboarding key goes in **`obkey`** (stored as `<key>:<serial>`), the soft serial in `serialno`. |
 
 Every call after the login carries `Authorization: Bearer <token.base64>`.
@@ -99,6 +100,7 @@ sequenceDiagram
     Z-->>W: session token (kept in memory only)
     M->>W: summary of an EVE-OS 17+ image: GET /ipxe/onboard?action=preview
     W-->>M: "will be registered as eve-<mac> in project <project>"
+    M->>W: n: a name for this machine (optional)
     M->>W: i pressed: GET /ipxe/onboard?action=register
     W->>Z: GET devices/serial/{mac}, else POST devices/model-less
     W-->>M: result, shown before the installer is loaded
@@ -109,10 +111,22 @@ sequenceDiagram
    secret): `ZEDEDA_ONBOARDING` (off by default), `ZEDEDA_CLUSTER`
    (`zedcontrol.zededa.net`), `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`,
    `ZEDEDA_PROJECT` (name or ID), `ZEDEDA_ONBOARDING_KEY` (the default key),
-   `ZEDEDA_NODE_NAME` (template, `eve-{mac}`; `{mac}` and `{serial}`). The
-   same group in the console menu and the web management. With onboarding on,
-   the stack gets `ENI_ONBOARD_URL`, the address the boot menu calls.
-2. **Login, in memory only.** The web management's *ZEDEDA onboarding* page
+   `ZEDEDA_NODE_NAME` (the naming convention, `eve-{mac}`) and
+   `ZEDEDA_NODE_NEXT` (the next sequence number, `1`). The same group in the
+   console menu and the web management. With onboarding on, the stack gets
+   `ENI_ONBOARD_URL`, the address the boot menu calls.
+2. **Node names.** ZEDEDA cannot rename a node, so the name is fixed when it
+   is created. The naming convention has `{mac}`, `{serial}` (the hardware
+   serial when it is real, else the MAC address) and `{n}` / `{n:3}` (a
+   sequence number, zero-padded to that width). Registrations are handled one
+   at a time; a number is taken only when a node is created, and
+   `ZEDEDA_NODE_NEXT` goes up by one, so machines installed at the same time
+   get different numbers and a re-installed machine uses none. The summary
+   shows the next number as a preview. A name typed in the boot menu (key
+   **n**, sent as `name=`) replaces the convention for that machine and takes
+   no number. Every name is reduced to lower case letters, digits and
+   hyphens, at most 63 characters.
+3. **Login, in memory only.** The web management's *ZEDEDA onboarding* page
    logs in with the password, which is used for that request only, or checks
    a pasted session token (single sign-on users cannot use `/login`). The
    token is kept in the memory of the `eve-netboot web` process: never on
@@ -120,26 +134,40 @@ sequenceDiagram
    it expires; onboarding then stops until someone logs in again. The project
    is looked up once at login (skipped for an ID); a project with an
    application policy or deployment gives a warning.
-3. **Boot menu, only for images of EVE-OS 17.0.0-lts and later.** Their
+4. **Boot menu, only for images of EVE-OS 17.0.0-lts and later.** Their
    summary is a small iPXE menu: the summary lines, the line *ZEDEDA: will be
-   registered as <name> in project <project>* (or why not), **Install now [i]**
-   and **Onboard in ZEDEDA: on/off [o]** (on by default; only with the soft
-   serial on). It is not among the general installation options, which are
+   registered as <name> in project <project>* (or why not), **Install now [i]**,
+   **Onboard in ZEDEDA: on/off [o]** (on by default; only with the soft
+   serial on) and **Node name [n]**. It is not among the general installation options, which are
    chosen before the image. The summary of older images is unchanged and says
    nothing about ZEDEDA.
-4. **Registration.** iPXE has no TLS, so the web management serves one
+5. **Registration.** iPXE has no TLS, so the web management serves one
    plain-HTTP path on its own port: `GET /ipxe/onboard`. Its TLS server peeks
    at the first bytes of a connection; only a request for this path is served
    without TLS, any other plain-HTTP request is redirected to HTTPS. `preview`
    only reports what will happen; `register` (after **i**) looks the node up
-   by serial and creates it when it is not there. The answer is a short iPXE
+   by serial and creates it when it is not there. A machine this appliance
+   registered before is answered from its own list without an API call. A
+   refused duplicate (409) is checked by serial: the same machine, or a name
+   already in use (reported as such); without the right to read nodes it is
+   reported as "already registered, or the name is in use". The answer is a short iPXE
    script that sets `eve_ob_ok` and `eve_ob_s` (ASCII, a strict character set).
    A failed registration is shown in red; the installation continues and the
    node can be added by hand.
-5. **Overview.** The page lists the machines it handled since the web
-   management started: time, node, MAC address, product and hardware serial,
-   and the result (created, already there, failed with the controller's
-   message).
+6. **The list of onboarded machines** (`/etc/eve-netboot/zededa-onboarded.json`,
+   no secrets, survives restarts, the newest 200): time, node name and ID,
+   project, MAC address, product and hardware serial, and the result
+   (created, already there, failed with the controller's message, deleted).
+   The web management and the console show it; *Export* gives it as CSV
+   (`GET /api/zededa/export`); *Delete* deletes a node in ZEDEDA
+   (`POST /api/zededa/delete`), only for nodes in the list, while logged in.
+7. **Console.** The console menu has the same *ZEDEDA onboarding* screen:
+   settings, login/logout, the list with delete, and the export (saved in the
+   admin's home folder and on the SMB share). The session stays in the web
+   management's process; the console uses it through the web management's
+   API on `127.0.0.1` with a key the web management makes at every start and
+   writes to `/run/eve-netboot-web.key` (memory, root only). The password typed
+   in the console is passed on for the login only.
 
 ## Safety
 
@@ -153,13 +181,16 @@ sequenceDiagram
   | `POST devices/model-less` | **Edge Nodes: Create** (required) |
   | `GET devices/serial/{serial}` | **Edge Nodes: Read** (optional: without it the duplicate check is skipped, and a refused duplicate, 409, counts as already there) |
   | `GET projects/name/{name}` | reading projects (optional: with the project's ID in `ZEDEDA_PROJECT` it is not looked up) |
+  | `DELETE devices/id/{id}` | **Edge Nodes: Delete** (optional: only to delete nodes from the appliance) |
 
 - `/ipxe/onboard` is reachable over plain HTTP from the boot network. It can
   only create a node, never change or delete one; for a valid MAC address
   (`aa-bb-cc-dd-ee-ff`), once per MAC address (duplicate check), at most 60
   registrations a minute, only while someone is logged in, and only in the
   configured project. Logging out of ZEDEDA after a batch closes it.
-- The node name is built from the template with the MAC address (or a real
+- Delete and export need the admin login (or the console's local key, which
+  is only accepted from `127.0.0.1`/`::1`); `/ipxe/onboard` can do neither.
+- The node name is built from the naming convention or a typed name with the MAC address (or a real
   hardware serial) and reduced to lower case letters, digits and hyphens;
   nothing the client sends reaches the API unchecked.
 

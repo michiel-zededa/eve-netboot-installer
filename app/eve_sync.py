@@ -809,6 +809,7 @@ def render_menu(entries, github_checked):
     a("set eve_pause 0")
     if ONBOARD_URL:
         a("set eve_onboard 1")
+        a("clear eve_ob_name")
     a("set eve_debug 0")
     a("set eve_blackbox 0")
     for var, key in (("eve_disk", "disk"), ("eve_persist", "persist"),
@@ -906,7 +907,8 @@ def release_major(e):
     return int(m.group(1)) if m else 0
 
 
-ONBOARD_QUERY = ("mac=${mac:hexhyp}&serial=${serial:uristring}&product=${product:uristring}")
+ONBOARD_QUERY = ("mac=${mac:hexhyp}&serial=${serial:uristring}&product=${product:uristring}"
+                 "&name=${eve_ob_name:uristring}")
 
 
 def onboard_parts(template):
@@ -936,6 +938,7 @@ def onboard_parts(template):
             "#@ONBOARD_CONFIRM": "\n".join([
                 ":eve_confirm_ob",
                 "iseq ${eve_onboard} 1 && set eve_onboard_s @@val_on@@ || set eve_onboard_s @@val_off@@",
+                "isset ${eve_ob_name} && set eve_ob_name_s ${eve_ob_name} || set eve_ob_name_s @@ob_name_auto@@",
                 "menu ${eve_title}",
                 "item --gap @@conf_source@@: ${eve_dir}/",
                 "item --gap ISO: @@conf_iso_ram@@",
@@ -951,11 +954,18 @@ def onboard_parts(template):
                 "item --gap",
                 "item --key i eve_boot ${eve_sp}@@ob_item_install@@",
                 "iseq ${eve_softserial} 1 && item --key o eve_ob_toggle ${eve_sp}@@opt_onboard@@: ${eve_onboard_s}  [o] ||",
+                "iseq ${eve_ob_do} 1 && item --key n eve_ob_rename ${eve_sp}@@ob_item_name@@: ${eve_ob_name_s}  [n] ||",
                 "item eve_menu ${eve_sp}<< @@opt_back@@",
                 "choose --default eve_menu eve_cchoice || goto eve_menu",
                 "goto ${eve_cchoice}",
                 ":eve_ob_toggle",
                 "iseq ${eve_onboard} 1 && set eve_onboard 0 || set eve_onboard 1",
+                "goto eve_confirm",
+                # a name for this one machine (empty: the naming convention)
+                ":eve_ob_rename",
+                "echo",
+                "echo @@ob_prompt_name@@",
+                "echo -n @@ob_item_name@@: ${} && read eve_ob_name ||",
                 "goto eve_confirm",
                 ""]),
             # registered only now, after i: the node exists before EVE-OS first boots

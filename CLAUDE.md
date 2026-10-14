@@ -115,7 +115,12 @@ and the UI type check + build.
   process's memory only: never in settings, exports, diagnostics, logs or API
   answers (tested). `/ipxe/onboard` is the only path served without TLS
   (`PlainHandler`); it may only create nodes. The role it needs: Edge Nodes
-  Create (+ Read); keep it working without Read and without reading projects.
+  Create (+ Read; + Delete only for deleting); keep it working without Read
+  and without reading projects. Node names: `{mac}`, `{serial}`, `{n}`/`{n:3}`
+  (`ZEDEDA_NODE_NEXT`, taken only when a node is created) or a name typed in
+  the menu (key n). The list of onboarded machines (`ONBOARDED`, no secrets)
+  survives restarts; the console reaches the session through the web
+  management's local key (`WEB_LOCAL_KEY` in /run, loopback only).
 - Appliance: the console shows only status without login; the menu needs the
   admin password. Without cloud-init settings nothing starts until the setup
   is done. Passwords (ADMIN_PASSWORD, SMB_PASSWORD) are applied and never

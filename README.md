@@ -88,7 +88,7 @@ All taken in a documentation network (`192.0.2.0/24`).
 | **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
 | **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); an optional DHCP service of its own (proxyDHCP next to your DHCP server, or a full DHCP server for an isolated network); automatic security updates and app updates with rollback. |
-| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. You log in to ZEDEDA in the web management; the session is kept in memory only. See [ZEDEDA onboarding](#zededa-onboarding). |
+| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. Node names follow a naming convention with the MAC address, the hardware serial or a sequence number (`bench1-node-{n:3}`), or are typed per machine in the boot menu. You log in to ZEDEDA in the web management or the console; the session is kept in memory only. The onboarded machines can be exported as CSV and their nodes deleted again from the appliance. See [ZEDEDA onboarding](#zededa-onboarding). |
 
 ## How it works
 
@@ -154,15 +154,21 @@ sequenceDiagram
 2. When you press **`i`**, the VM creates the edge node **without a model**
    (EVE-OS 17 and later report their own hardware) in one **onboarding
    project**. A machine installed again gets no second node.
-3. After the installation EVE-OS registers, comes online and reports its
+3. The node's name follows your naming convention: the MAC address, the
+   hardware serial or a sequence number (`bench1-node-{n:3}` gives
+   `bench1-node-001`, `-002`, … for the machines of a staging bench), or a
+   name typed for that machine in the boot menu. ZEDEDA cannot rename a node
+   later, so it is fixed at installation.
+4. After the installation EVE-OS registers, comes online and reports its
    adapters. You assign them to network instances and move the node to the
    project it belongs in.
-4. The web management lists which MAC address, hardware serial and product
-   became which node, so you can tell the machines apart.
+5. The web management and the console list which MAC address, hardware
+   serial and product became which node; the list can be exported as CSV,
+   and a node created by mistake can be deleted again.
 
-The summary of an EVE-OS 17+ image shows the node name and the option
-**Onboard in ZEDEDA [o]** (on by default) next to **Install now [i]**; older
-images are installed as before, without onboarding. Setup and use:
+The summary of an EVE-OS 17+ image shows the node name and the options
+**Onboard in ZEDEDA [o]** (on by default) and **Node name [n]** next to
+**Install now [i]**; older images are installed as before, without onboarding. Setup and use:
 [vm/README.md: Onboard installed machines in ZEDEDA](vm/README.md#onboard-installed-machines-in-zededa);
 design and the ZEDEDA API it uses:
 [docs/design/zededa-onboarding.md](docs/design/zededa-onboarding.md).
@@ -203,7 +209,7 @@ design and the ZEDEDA API it uses:
 3. **Set it up** on the VM's screen, in a browser at `https://<VM address>:8443/`, or through cloud-init: language, network, admin password.
 4. **DHCP:** turn on *DHCP service → Proxy* in the VM, or set next-server and the boot file on your DHCP server (see [DHCP](#dhcp)).
 5. **Boot a machine:** network boot it, pick a release, review the options and press **`i`**.
-6. **Optional, onboard in ZEDEDA:** switch on *ZEDEDA onboarding* in the web management, log in to ZEDEDA there, and the machines you install with EVE-OS 17+ are registered as edge nodes (see [ZEDEDA onboarding](#zededa-onboarding)).
+6. **Optional, onboard in ZEDEDA:** switch on *ZEDEDA onboarding* in the web management or the console menu, log in to ZEDEDA there, and the machines you install with EVE-OS 17+ are registered as edge nodes (see [ZEDEDA onboarding](#zededa-onboarding)).
 
 **[vm/README.md](vm/README.md)** is the full guide: setup, the console and web management, your own ISOs, updates and replacing the VM.
 
@@ -256,7 +262,7 @@ Everything is configured in `.env`; [.env.example](.env.example) documents every
 
 - **`ENI_*`:** EVE Netboot Installer itself: image, language, boot menu, sync intervals, GitHub token.
 - **`EVE_*`:** EVE-OS: which releases are mirrored (`EVE_ARCHES`, `EVE_FLAVOURS`, `EVE_LTS_LINES`, `EVE_GITHUB_REPO`) and, as `EVE_DEFAULT_*`, the defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
-- **VM appliance only:** the settings of the VM itself, such as its network, its DHCP service (`DHCP_*`) and ZEDEDA onboarding (`ZEDEDA_ONBOARDING`, `ZEDEDA_CLUSTER`, `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`, `ZEDEDA_PROJECT`, `ZEDEDA_ONBOARDING_KEY`, `ZEDEDA_NODE_NAME`). There is no setting for the ZEDEDA password or session: those are never stored. See [vm/README.md: all settings](vm/README.md#10-all-settings).
+- **VM appliance only:** the settings of the VM itself, such as its network, its DHCP service (`DHCP_*`) and ZEDEDA onboarding (`ZEDEDA_ONBOARDING`, `ZEDEDA_CLUSTER`, `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`, `ZEDEDA_PROJECT`, `ZEDEDA_ONBOARDING_KEY`, `ZEDEDA_NODE_NAME`, `ZEDEDA_NODE_NEXT`). There is no setting for the ZEDEDA password or session: those are never stored. See [vm/README.md: all settings](vm/README.md#10-all-settings).
 - **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, `EVE_MENU_MODE`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
 
 The most important ones:
@@ -313,7 +319,7 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 
 ## Operation
 
-On the VM appliance all of this is in its console menu and web management: logs, *Check GitHub now*, *Update EVE Netboot Installer* (with rollback) and automatic security updates ([vm/README.md: daily use](vm/README.md#6-daily-use)). Its web management also has the *ZEDEDA onboarding* page: the login to ZEDEDA and the overview of onboarded machines. With Docker Compose:
+On the VM appliance all of this is in its console menu and web management: logs, *Check GitHub now*, *Update EVE Netboot Installer* (with rollback) and automatic security updates ([vm/README.md: daily use](vm/README.md#6-daily-use)). Its web management and console menu also have *ZEDEDA onboarding*: the login to ZEDEDA, the list of onboarded machines, its CSV export and deleting a node. With Docker Compose:
 
 | Task | Command |
 |---|---|
@@ -361,7 +367,8 @@ How the translations work:
 - **Integrity:** GitHub downloads are checked against the sha256 published with each release.
 - **ZEDEDA onboarding** (VM appliance):
   - The ZEDEDA password is used for the login only; the session token is kept in the memory of the web management, never on disk, in exports, diagnostics or logs. It is gone after a restart and expires after a few hours.
-  - Use a local ZEDEDA user only for this, with a role that may only create (and read) edge nodes, such as a custom role with *Edge Nodes: Create* and *Read*: the session can do whatever that user can.
+  - Use a local ZEDEDA user only for this, with a role that may only create (and read) edge nodes, such as a custom role with *Edge Nodes: Create* and *Read*; add *Delete* only to delete nodes from the appliance. The session can do whatever that user can.
+  - Deleting nodes and the export need the admin login or the console. The list of onboarded machines on the VM holds no secrets.
   - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of the management port. It can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Anyone in the boot network can send that request, so log out of ZEDEDA when the batch is installed.
 
 ## Limitations

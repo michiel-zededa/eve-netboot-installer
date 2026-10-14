@@ -139,6 +139,8 @@ export const SECTIONS: Section[] = [
         field(t, "ZEDEDA_PROJECT", "text", { showIf: on }),
         field(t, "ZEDEDA_ONBOARDING_KEY", "text", { showIf: on }),
         field(t, "ZEDEDA_NODE_NAME", "text", { showIf: on, placeholder: "eve-{mac}" }),
+        field(t, "ZEDEDA_NODE_NEXT", "number", { placeholder: "1",
+          showIf: (v) => on(v) && /\{n(:\d)?\}/.test(v.ZEDEDA_NODE_NAME ?? "") }),
       ];
     },
   },

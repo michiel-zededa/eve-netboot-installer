@@ -420,44 +420,87 @@ for which you have to know which soft serial ended up on which machine. Here:
 **Set it up once:**
 
 1. In ZEDEDA, create:
-   - a **role** that may only create edge nodes: a custom role with
-     **Edge Nodes: Create** and, preferably, **Edge Nodes: Read** (then a
-     machine that is installed again is skipped instead of refused). Nothing
-     else is needed;
+   - a **role** for onboarding only: a custom role with **Edge Nodes: Create**
+     and, preferably, **Edge Nodes: Read** (then a machine that is installed
+     again is recognised instead of refused). Add **Edge Nodes: Delete** only
+     if you want to delete nodes from the appliance. Nothing else is needed;
    - a **local user** only for this, with that role (local: single sign-on
      users cannot log in with a password through the API);
    - a **project without an application policy** (ZEDEDA refuses nodes
      without a model in a project with one), for example `onboarding`.
-2. In the web management, *ZEDEDA onboarding*: switch it on and fill in the API
-   address of your cluster (`zedcontrol.zededa.net` by default), the
-   enterprise, the user and the project. When the role may not read projects,
-   enter the project's ID instead of its name. The onboarding key is filled in
-   with the default of the EVE-OS images from GitHub.
-3. Optionally, check the user and its role from any computer with Python:
+2. In the web management or the console menu, *ZEDEDA onboarding*: switch it
+   on and fill in the API address of your cluster (`zedcontrol.zededa.net` by
+   default), the enterprise, the user and the project. When the role may not
+   read projects, enter the project's ID instead of its name. The onboarding
+   key is filled in with the default of the EVE-OS images from GitHub.
+3. Choose the **naming convention** of the nodes (*Node name*). A node cannot
+   be renamed in ZEDEDA after it is created, so the name is fixed when the
+   machine is installed:
+
+   | Placeholder | Becomes | Example |
+   |---|---|---|
+   | `{mac}` | the MAC address, which is also the soft serial | `eve-{mac}` → `eve-52-54-00-12-34-56` (the default) |
+   | `{serial}` | the hardware serial; the MAC address when the machine has none | `site1-{serial}` → `site1-cz2345abc` |
+   | `{n}` | a sequence number | `bench1-node-{n}` → `bench1-node-7` |
+   | `{n:3}` | the same, with leading zeros to that width | `bench1-node-{n:3}` → `bench1-node-007` |
+
+   With `{n}`, *Next number* sets the number for the next machine; it goes up
+   by one with every node created. Every machine takes its number when **i**
+   is pressed, so machines installed at the same time on a staging bench each
+   get their own. Names are lower case letters, digits and hyphens, at most 63
+   characters.
+4. Optionally, check the user and its role from any computer with Python:
    [docs/design/zededa_api_probe.py](../docs/design/zededa_api_probe.py)
    creates and deletes one test node
    ([how](../docs/design/zededa-onboarding.md#checking-a-zededa-user)).
 
 **Each time you install machines:**
 
-1. Web management → *ZEDEDA onboarding* → **Log in to ZEDEDA** with the
-   password of that user. The password is used for this login only; the
-   session is kept **in the VM's memory only**, never on disk or in an export.
-   It lasts 4 hours, and ends when the VM or the web management restarts.
-   Users with single sign-on paste a session token instead.
+1. *ZEDEDA onboarding* → **Log in to ZEDEDA** with the password of that user,
+   in the web management or in the console menu. The password is used for this
+   login only; the session is kept **in the VM's memory only**, never on disk
+   or in an export. It lasts 4 hours, and ends when the VM or the web
+   management restarts. Users with single sign-on paste a session token in the
+   web management instead.
 2. Network boot the machines and choose an EVE-OS 17 (or later) image. Its
-   summary shows *ZEDEDA: will be registered as eve-…* and two choices:
-   **Install now [i]** and **Onboard in ZEDEDA: on [o]**. Press **i**: the VM
-   creates the node, then the installation starts.
-3. The overview on the same page fills while the machines install. After
-   their first boot the nodes come online in the onboarding project; assign
-   their adapters to network instances and move them to their own project.
+   summary shows *ZEDEDA: will be registered as …* and the choices
+   **Install now [i]**, **Onboard in ZEDEDA: on [o]** and **Node name [n]**.
+   Press **i**: the VM creates the node, then the installation starts.
+3. The list of onboarded machines (web management and console) fills while
+   the machines install: node name, MAC address, product and hardware serial,
+   and the result. After their first boot the nodes come online in the
+   onboarding project; assign their adapters to network instances and move
+   them to their own project.
+4. Log out of ZEDEDA when the batch is installed.
 
-**o** in that summary switches onboarding off (or on again) for this machine;
-it is on by default. The option is only there for EVE-OS 17 and later images:
+In the summary of an EVE-OS 17+ image:
+
+- **n** types a name for this one machine, for example the label on its
+  front; it replaces the naming convention (and takes no number). Empty: the
+  naming convention again.
+- **o** switches onboarding off (or on again) for this machine; it is on by
+  default.
+
+The options are only there for EVE-OS 17 and later images:
 the summary of an older image looks exactly as without onboarding. With the
 soft serial switched off (installation options) or nobody logged in to ZEDEDA,
 the machine is installed but not onboarded, and the summary says why.
+
+**The list of onboarded machines** is kept on the VM (it holds no secrets) and
+survives restarts:
+
+- **Export:** *Export (CSV)* in the web management, or *Export the list (CSV)*
+  in the console (saved in the admin's home folder and on the SMB share). One
+  line per machine: time, node name, MAC address (soft serial), hardware
+  serial, product, project, result and node ID; for example to label the
+  machines or to record where each one went.
+- **Delete:** the bin next to a node in the web management, or choose the
+  machine in the console's list. It deletes the node in ZEDEDA; the machine
+  keeps EVE-OS but is no longer known to the controller (install it again to
+  onboard it again). Only nodes this VM created can be deleted, while logged
+  in, and the role needs **Edge Nodes: Delete**.
+- A machine that is installed again is recognised from the list and gets no
+  second node.
 
 **Roadmap:** onboarding for EVE-OS older than 17 by choosing a hardware model
 for a batch of identical machines. ZEDEDA requires such a machine to match the
@@ -584,6 +627,8 @@ the default value. Both work as they are, as cloud-init user-data:
 | The browser warns about the certificate on port 8443 | Expected: the VM makes its own certificate. Accept it once for this address (Safari: *Show Details → visit this website*; Chrome: *Advanced → Proceed*; Firefox: *Advanced → Accept the Risk*). |
 | Port 8443 does not answer | Web management is off after a setup on the VM's screen: menu → *Advanced settings → Web management*. |
 | After a network change in the browser the page is gone | Open the new address within 2 minutes and confirm there; otherwise the previous settings come back by themselves. |
+| After EVE-OS is installed, the machine shows *failed to start Boot0002 "UEFI PXEv4"*, *PXEv6 … Not Found* and *Start HTTP Boot over IPv4* before it boots from its disk | The firmware's boot order. *Boot from local disk* (or the menu's timeout) hands the machine back to its firmware, which then tries its next boot entries: PXE over IPv6 and HTTP Boot each wait for answers that do not come. Put the disk directly after *PXEv4* in the boot order, or disable PXEv6 and HTTP Boot in the firmware (or the hypervisor's VM settings); the machine then boots from disk at once. |
+| *ZEDEDA: registration failed: …* in the summary | The controller's own words: for example a project with an application policy, a name already in use, or a role without *Edge Nodes: Create*. The machine is installed anyway; add the node by hand or install it again. |
 | Forgot the admin password | Log in with an SSH key if you set one, or deploy a new VM and import the settings ([step 9](#9-replace-the-vm-with-a-newer-version)). |
 
 Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `sudo cat /var/log/eve-netboot.log`.
@@ -608,6 +653,7 @@ Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `
   - The ZEDEDA password is used for the login only. The session token is kept in the web management's memory, never on disk, in exports, diagnostics or logs; it is gone after a restart and expires after a few hours.
   - Use a local ZEDEDA user only for this, with a role that may only create (and read) edge nodes: the session can do whatever that user can.
   - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of port 8443; every other plain-HTTP request there is sent to HTTPS. That path can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Log out of ZEDEDA when the batch is installed.
+  - Deleting nodes and the export need the admin login (web management) or the console menu. The console uses the web management's session through a key that only root can read and that is made new at every start of the web management (`/run`, memory only).
 
 ---
 

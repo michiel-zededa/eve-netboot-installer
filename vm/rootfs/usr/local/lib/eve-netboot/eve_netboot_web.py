@@ -29,7 +29,9 @@ Security
 that changes the system goes through its functions, exactly like the console.
 """
 
+import csv
 import datetime
+import hmac
 import html
 import http.server
 import io
@@ -102,8 +104,13 @@ class App:
         self.rollback = None    # {"token", "deadline", "previous", "timer"}
         # ZEDEDA: memory only. {"token", "expires", "user", "enterprise", "cluster", "via", "since"}
         self.zededa = None
-        self.onboarded = []     # newest first: {"mac", "name", "serial", "result", "message", "time"}
+        # the machines onboarded (newest first; no secrets, kept in core.ONBOARDED):
+        # {"mac", "name", "node_id", "project", "hardware_serial", "product", "result", "message", "time"}
+        self.onboarded = self.load_onboarded()
         self.onboard_times = []
+        self.number_lock = threading.Lock()   # one registration at a time: unique sequence numbers
+        # the console uses the ZEDEDA session through this key (core.WEB_LOCAL_KEY, /run, root only)
+        self.local_key = secrets.token_hex(32)
 
     # ---- ZEDEDA session (memory only)
     def zededa_session(self):
@@ -124,11 +131,27 @@ class App:
             self.onboard_times.append(now)
             return True
 
+    def load_onboarded(self):
+        try:
+            data = json.loads(self.core.read(self.core.ONBOARDED) or "[]")
+            return [e for e in data if isinstance(e, dict) and MAC_RE.match(str(e.get("mac", "")))]
+        except ValueError:
+            return []
+
+    def save_onboarded(self):
+        self.core.write(self.core.ONBOARDED, json.dumps(self.onboarded, indent=1) + "\n")
+
     def remember(self, entry):
         with self.lock:
             self.onboarded = [e for e in self.onboarded if e["mac"] != entry["mac"]]
             self.onboarded.insert(0, entry)
             del self.onboarded[ONBOARD_KEEP:]
+            self.save_onboarded()
+
+    def onboarded_node(self, mac):
+        """The node this appliance registered for a MAC address (not deleted), or None."""
+        return next((e for e in self.onboarded if e["mac"] == mac and e.get("result") in ("created", "exists")),
+                    None)
 
     # ---- sessions
     def new_session(self):
@@ -253,7 +276,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return None
 
     def authenticated(self):
-        return self.app.valid_session(self.cookie("eni_session"))
+        if self.app.valid_session(self.cookie("eni_session")):
+            return True
+        # the console on this VM (eve-netboot menu), with the key only root can read
+        key = self.headers.get("X-ENI-Local") or ""
+        return bool(key) and self.client_ip() in ("127.0.0.1", "::1") and hmac.compare_digest(
+            key, self.app.local_key)
 
     def send(self, status, body=b"", ctype="application/json", headers=None):
         if isinstance(body, (dict, list)):
@@ -369,6 +397,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              {"Content-Disposition": 'attachment; filename="eve-netboot-settings.txt"'})
         if path == "/api/zededa":
             return self.send(200, self.zededa_info())
+        if path == "/api/zededa/export":
+            name = f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv"
+            return self.send(200, self.zededa_csv(), "text/csv; charset=utf-8",
+                             {"Content-Disposition": f'attachment; filename="{name}"'})
         if path == "/api/diagnostics":
             name = f"eve-netboot-diagnostics-{datetime.datetime.now():%Y%m%d-%H%M}.tar.gz"
             return self.send(200, self.diagnostics(), "application/gzip",
@@ -472,6 +504,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.zededa_login()
         if method == "POST" and path == "/api/zededa/logout":
             return self.zededa_logout()
+        if method == "POST" and path == "/api/zededa/delete":
+            return self.zededa_delete(str(self.json_body().get("mac") or "").lower())
         if method == "DELETE" and path == "/api/images":
             return self.delete_image(query.get("file", [""])[0])
         raise HttpError(404, "Unknown API.")
@@ -767,46 +801,120 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not z:
             return answer(False, c.tr("adm_zo_not_logged_in"))
         hw_serial = q.get("serial", "")[:64]
-        name = zededa.node_name(c.get(s, "ZEDEDA_NODE_NAME"), mac, hw_serial)
+        typed = zededa.clean_name(q.get("name", ""))      # a name typed in the boot menu (key n)
         project = c.get(s, "ZEDEDA_PROJECT")
+        known = self.app.onboarded_node(mac)
         if action == "preview":
-            return answer(True, c.tr("adm_zo_preview", name=name, project=project))
+            if known:
+                return answer(True, c.tr("adm_zo_exists", name=known["name"]))
+            template = c.get(s, "ZEDEDA_NODE_NAME")
+            if typed or not zededa.uses_number(template):
+                name = typed or zededa.node_name(template, mac, hw_serial)
+                return answer(True, c.tr("adm_zo_preview", name=name, project=project))
+            # the number is only taken when i is pressed: machines installed at once differ
+            name = zededa.node_name(template, mac, hw_serial, int(c.get(s, "ZEDEDA_NODE_NEXT")))
+            return answer(True, c.tr("adm_zo_preview_number", name=name, project=project))
         if not self.app.onboard_allowed():
             return answer(False, c.tr("adm_zo_busy"))
-        entry = {"mac": mac, "name": name, "serial": mac, "hardware_serial": hw_serial,
-                 "product": q.get("product", "")[:64], "time": time.time()}
+        with self.app.number_lock:
+            ok, text = self.register(mac, typed, hw_serial, q.get("product", "")[:64], z)
+        answer(ok, text)
+
+    def register(self, mac, typed, hw_serial, product, z):
+        """Create the node for this MAC address (once). -> (ok, text for the boot menu)."""
+        c = self.core
+        known = self.app.onboarded_node(mac)              # registered by this VM before: no API call
+        if known:
+            return True, c.tr("adm_zo_exists", name=known["name"])
+        s = c.load_settings()
+        template, project = c.get(s, "ZEDEDA_NODE_NAME"), c.get(s, "ZEDEDA_PROJECT")
+        number = None if typed or not zededa.uses_number(template) else int(c.get(s, "ZEDEDA_NODE_NEXT"))
+        name = typed or zededa.node_name(template, mac, hw_serial, number)
+        entry = {"mac": mac, "name": name, "node_id": "", "project": project, "hardware_serial": hw_serial,
+                 "product": product, "time": time.time()}
         client = zededa.Client(z["cluster"], token=z["token"])
+
+        def lookup():
+            try:
+                return client.device_by_serial(mac)       # serial = soft serial = the MAC address
+            except zededa.ZededaError as e:
+                if e.status != 403:                       # a role that may create but not read nodes
+                    raise
+                return False                              # unknown
+
         try:
             if not z.get("project_id"):
                 raise zededa.ZededaError(400, c.tr("adm_zo_project_unknown", project=project, error="-"))
-            try:
-                node = client.device_by_serial(mac)    # serial = soft serial = the MAC address
-            except zededa.ZededaError as e:
-                if e.status != 403:                    # a role that may create but not read nodes
-                    raise
-                node = None
+            node = lookup()
             if node:
-                entry.update(result="exists", name=node.get("name", name))
+                entry.update(result="exists", name=node.get("name", name), node_id=node.get("id", ""))
                 text = c.tr("adm_zo_exists", name=entry["name"])
             else:
                 try:
-                    client.create_modelless(name, name, z["project_id"], mac, c.get(s, "ZEDEDA_ONBOARDING_KEY"))
+                    entry["node_id"] = client.create_modelless(name, name, z["project_id"], mac,
+                                                               c.get(s, "ZEDEDA_ONBOARDING_KEY"))
                     entry["result"] = "created"
                     text = c.tr("adm_zo_created", name=name, project=project)
+                    if number is not None:            # the next machine gets the next number
+                        cur = c.load_settings()
+                        cur["ZEDEDA_NODE_NEXT"] = str(number + 1)
+                        c.save_settings(cur)
                 except zededa.ZededaError as e:
-                    if e.status != 409:                # the serial (or name) is already known
+                    if e.status != 409:
                         raise
-                    entry["result"] = "exists"
-                    text = c.tr("adm_zo_exists", name=name)
+                    # refused as a duplicate: this serial is known, or the name is taken
+                    node = lookup()
+                    if node:
+                        entry.update(result="exists", name=node.get("name", name), node_id=node.get("id", ""))
+                        text = c.tr("adm_zo_exists", name=entry["name"])
+                    elif node is False:                   # may not read nodes: cannot tell which
+                        entry["result"] = "exists"
+                        text = c.tr("adm_zo_exists_or_name", name=name)
+                        entry["message"] = text
+                    else:
+                        raise zededa.ZededaError(409, c.tr("adm_zo_name_in_use", name=name)) from None
         except zededa.ZededaError as e:
             if e.status == 401:
                 self.app.zededa = None
             entry.update(result="failed", message=str(e))
             text = c.tr("adm_zo_failed", error=str(e))
-        entry.setdefault("message", text)
+        entry.setdefault("message", "")
         self.app.remember(entry)
-        c.log(f"web: onboarding {mac} ({self.client_ip()}): {entry['result']} {entry['name']} {entry.get('message', '')}")
-        answer(entry["result"] != "failed", text)
+        c.log(f"web: onboarding {mac} ({self.client_ip()}): {entry['result']} {entry['name']} {entry['message']}")
+        return entry["result"] != "failed", text
+
+    def zededa_delete(self, mac):
+        """Delete the node this appliance registered for a MAC address, in ZEDEDA."""
+        c = self.core
+        node = self.app.onboarded_node(mac)
+        if not node or not node.get("node_id"):
+            raise HttpError(404, c.tr("adm_zo_delete_unknown"))
+        z = self.app.zededa_session()
+        if not z:
+            raise HttpError(409, c.tr("adm_zo_delete_login"))
+        try:
+            zededa.Client(z["cluster"], token=z["token"]).delete_device(node["node_id"])
+        except zededa.ZededaError as e:
+            if e.status == 403:
+                raise HttpError(403, c.tr("adm_zo_delete_forbidden")) from None
+            if e.status != 404:                           # 404: already gone in ZEDEDA
+                raise HttpError(502, c.tr("adm_zo_failed", error=str(e))) from None
+        with self.app.lock:
+            node.update(result="deleted", deleted=time.time())
+            self.app.save_onboarded()
+        c.log(f"web: deleted ZEDEDA node {node['name']} ({mac})")
+        self.send(200, {"ok": True})
+
+    def zededa_csv(self):
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["time", "name", "mac", "soft_serial", "hardware_serial", "product", "project", "result",
+                    "node_id", "message"])
+        for e in self.app.onboarded:
+            w.writerow([datetime.datetime.fromtimestamp(e.get("time", 0)).isoformat(timespec="seconds"),
+                        e.get("name", ""), e["mac"], e["mac"], e.get("hardware_serial", ""), e.get("product", ""),
+                        e.get("project", ""), e.get("result", ""), e.get("node_id", ""), e.get("message", "")])
+        return out.getvalue()
 
     def logs(self, source, lines):
         c = self.core
@@ -1052,6 +1160,8 @@ def serve(core):
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(cert, key)
     Handler.app = App(core)
+    core.write(core.WEB_LOCAL_KEY, Handler.app.local_key + "\n")
+    os.chmod(core.WEB_LOCAL_KEY, 0o600)
     httpd = TLSServer(("0.0.0.0", port), Handler, ctx)
     core.log(f"web: management on https://{core.primary_ip() or '0.0.0.0'}:{port}/")
     httpd.serve_forever()

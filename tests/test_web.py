@@ -6,6 +6,7 @@ system (applying settings, passwords, docker, systemctl) is replaced.
     python3 -m unittest discover -s tests -v
 """
 
+import csv
 import http.client
 import http.server
 import importlib.machinery
@@ -73,7 +74,7 @@ class WebBase(unittest.TestCase):
             f.write("<html>ui</html>")
         with open(os.path.join(TMP, "secret.txt"), "w") as f:
             f.write("outside the web root")
-        for path in (core.SETTINGS, core.CONFIGURED):
+        for path in (core.SETTINGS, core.CONFIGURED, core.ONBOARDED):
             if os.path.exists(path):
                 os.remove(path)
         self.applied = []
@@ -447,10 +448,11 @@ class ZededaWebTest(WebBase):
                             "ZEDEDA_USER": "eni@example.net", "ZEDEDA_PROJECT": "netboot"})
         core.write(core.CONFIGURED, "now\n")
 
-    def onboard(self, action="register", mac=MAC, serial="To Be Filled By O.E.M."):
+    def onboard(self, action="register", mac=MAC, serial="To Be Filled By O.E.M.", name=""):
         """The boot menu's request, over plain HTTP like iPXE sends it."""
         conn = http.client.HTTPConnection("127.0.0.1", self.plain_port, timeout=10)
-        conn.request("GET", f"/ipxe/onboard?action={action}&mac={mac}&serial={serial.replace(' ', '%20')}&product=X1")
+        conn.request("GET", f"/ipxe/onboard?action={action}&mac={mac}&serial={serial.replace(' ', '%20')}"
+                            f"&product=X1&name={name.replace(' ', '%20')}")
         r = conn.getresponse()
         body = r.read().decode()
         self.assertEqual(r.status, 200, body)
@@ -518,7 +520,7 @@ class ZededaWebTest(WebBase):
         self.assertEqual(len(FakeZededa.created), 1)
         status, body, _ = self.request("GET", "/api/zededa")
         self.assertEqual([(n["mac"], n["result"], n["product"]) for n in body["onboarded"]],
-                         [(self.MAC, "exists", "X1")])
+                         [(self.MAC, "created", "X1")])
 
     def test_boot_menu_requests_are_checked(self):
         self.start_tls()
@@ -579,6 +581,114 @@ class ZededaWebTest(WebBase):
             self.assertEqual(ob["eve_ob_ok"], "0")
             self.assertIn("enter the project's ID", ob["eve_ob_s"])
             self.assertEqual(FakeZededa.created, [])
+
+    def zededa_login(self):
+        self.start_tls()
+        self.login()
+        self.assertEqual(self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})[0], 200)
+
+    def test_naming_convention_with_a_number(self):
+        core.save_settings({**core.load_settings(), "ZEDEDA_NODE_NAME": "bench1-node-{n:3}", "ZEDEDA_NODE_NEXT": "7"})
+        self.zededa_login()
+        ob = self.onboard("preview")
+        self.assertEqual(ob["eve_ob_s"], "will be registered as bench1-node-007 in project netboot "
+                                         "(the number is fixed when installing)")
+        macs = [f"52-54-00-00-00-{i:02x}" for i in range(3)]
+        for mac in macs:
+            self.assertEqual(self.onboard(mac=mac)["eve_ob_ok"], "1")
+        self.assertEqual([c[0] for c in FakeZededa.created], ["bench1-node-007", "bench1-node-008", "bench1-node-009"])
+        self.assertEqual(core.get(core.load_settings(), "ZEDEDA_NODE_NEXT"), "10")
+        self.onboard(mac=macs[0])                                      # installed again: no number used
+        self.assertEqual(core.get(core.load_settings(), "ZEDEDA_NODE_NEXT"), "10")
+
+    def test_name_typed_in_the_boot_menu(self):
+        core.save_settings({**core.load_settings(), "ZEDEDA_NODE_NAME": "bench-{n}", "ZEDEDA_NODE_NEXT": "1"})
+        self.zededa_login()
+        ob = self.onboard("preview", name="Rack 3 / Slot 12")
+        self.assertEqual(ob["eve_ob_s"], "will be registered as rack-3-slot-12 in project netboot")
+        self.onboard(name="Rack 3 / Slot 12")
+        self.assertEqual(FakeZededa.created[0][0], "rack-3-slot-12")
+        self.assertEqual(core.get(core.load_settings(), "ZEDEDA_NODE_NEXT"), "1")   # the counter is untouched
+
+    def test_name_in_use(self):
+        class Taken(FakeZededa):
+            def create_modelless(self, name, title, pid, serial, key):
+                raise web.zededa.ZededaError(409, "conflict")
+
+        with mock.patch.object(web.zededa, "Client", Taken):
+            self.zededa_login()
+            ob = self.onboard()
+        self.assertEqual((ob["eve_ob_ok"], ob["eve_ob_s"]),
+                         ("0", "registration failed: the name eve-52-54-00-12-34-56 is already in use in ZEDEDA"))
+
+    def test_delete_and_export(self):
+        deleted = []
+        FakeZededa.delete_device = lambda client, node_id: deleted.append(node_id)
+        self.addCleanup(delattr, FakeZededa, "delete_device")
+        self.zededa_login()
+        self.onboard()
+        self.onboard(mac="52-54-00-00-00-99")
+        status, csv_text, r = self.request("GET", "/api/zededa/export")
+        self.assertEqual(status, 200)
+        self.assertIn("attachment", r.getheader("Content-Disposition"))
+        rows = list(csv.DictReader(io.StringIO(csv_text.decode())))
+        self.assertEqual([(x["mac"], x["name"], x["result"], x["product"]) for x in rows],
+                         [("52-54-00-00-00-99", "eve-52-54-00-00-00-99", "created", "X1"),
+                          (self.MAC, "eve-52-54-00-12-34-56", "created", "X1")])
+        self.assertNotIn("SECRET-TOKEN", csv_text.decode())
+        self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": self.MAC})[0], 200)
+        self.assertEqual(deleted, ["node-1"])
+        status, body, _ = self.request("GET", "/api/zededa")
+        self.assertEqual([n["result"] for n in body["onboarded"]], ["created", "deleted"])
+        self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": self.MAC})[0], 404)   # deleted already
+        self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": "52-54-00-aa-aa-aa"})[0], 404)
+        # only with the admin
+        self.cookie = None
+        self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": "52-54-00-00-00-99"})[0], 401)
+        self.assertEqual(self.request("GET", "/api/zededa/export")[0], 401)
+
+    def test_delete_needs_the_right(self):
+        def forbidden(client, node_id):
+            raise web.zededa.ZededaError(403, "permission denied")
+        FakeZededa.delete_device = forbidden
+        self.addCleanup(delattr, FakeZededa, "delete_device")
+        self.zededa_login()
+        self.onboard()
+        status, body, _ = self.request("POST", "/api/zededa/delete", {"mac": self.MAC})
+        self.assertEqual(status, 403)
+        self.assertIn("Edge Nodes: Delete", body["error"])
+
+    def test_list_survives_a_restart_and_holds_no_secrets(self):
+        self.zededa_login()
+        self.onboard()
+        self.assertNotIn("SECRET-TOKEN", core.read(core.ONBOARDED))
+        web.Handler.app = web.App(core)                              # the web management restarts
+        self.assertIsNone(web.Handler.app.zededa)                    # the session is gone
+        self.assertEqual([n["mac"] for n in web.Handler.app.onboarded], [self.MAC])
+
+    def test_the_console_uses_the_local_key(self):
+        key = web.Handler.app.local_key
+        self.cookie = None
+        h = {"X-ENI-Local": key}
+        self.assertEqual(self.request("GET", "/api/zededa", headers=h)[0], 200)
+        self.assertEqual(self.request("GET", "/api/zededa", headers={"X-ENI-Local": "wrong"})[0], 401)
+        status, body, _ = self.request("POST", "/api/zededa/login", {"password": "zededa-pw"}, headers=h)
+        self.assertEqual(status, 200, body)
+
+    def test_console_reaches_the_session_over_tls(self):
+        """core.web_api (the console) -> the TLS server, with the key from the key file."""
+        self.start_tls()
+        keyfile = os.path.join(tempfile.mkdtemp(dir=TMP), "web.key")
+        with open(keyfile, "w") as f:
+            f.write(web.Handler.app.local_key + "\n")
+        core.save_settings({**core.load_settings(), "WEB_ADMIN_PORT": str(self.plain_port)})
+        with mock.patch.object(core, "WEB_LOCAL_KEY", keyfile):
+            status, info = core.web_api("GET", "/api/zededa")
+            self.assertEqual((status, info["enabled"], info["session"]), (200, True, None))
+            status, answer = core.web_api("POST", "/api/zededa/login", {"password": "zededa-pw"})
+            self.assertEqual((status, answer["session"]["user"]), (200, "eni@example.net"))
+        with mock.patch.object(core, "WEB_LOCAL_KEY", os.path.join(TMP, "missing.key")):
+            self.assertEqual(core.web_api("GET", "/api/zededa")[0], 0)      # web management not running
 
     def test_off(self):
         self.start_tls()
