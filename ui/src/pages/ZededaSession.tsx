@@ -1,5 +1,5 @@
-// The ZEDEDA session of the onboarding: log in with a password (used once,
-// never kept) or a pasted session token. The appliance keeps the token in
+// The ZEDEDA session of the onboarding: log in with an API (or session) token,
+// or with the user's password (used once, never kept). The appliance keeps the token in
 // memory only; after a restart or when it expires, log in again.
 import { useEffect, useState } from "react";
 import { Download, LogIn, LogOut, Trash2, TriangleAlert } from "lucide-react";
@@ -67,6 +67,8 @@ export default function ZededaSession() {
   if (!info) return error ? <div className="alert err">{error}</div> : null;
   if (!info.enabled) return null;
   const s = info.session;
+  // a password needs the user and enterprise from the settings; an API token needs nothing else
+  const withPassword = Boolean(info.user && info.enterprise);
 
   return (
     <>
@@ -77,8 +79,10 @@ export default function ZededaSession() {
           <>
             <p>
               <span className="pill ok">{t("adm_zo_logged_in")}</span>{" "}
-              {t("adm_zo_session_text", { user: s.user, enterprise: s.enterprise, cluster: s.cluster,
-                                          until: time(s.expires) })}
+              {s.via === "token"
+                ? t("adm_zo_session_token_text", { cluster: s.cluster })
+                : t("adm_zo_session_text", { user: s.user, enterprise: s.enterprise, cluster: s.cluster,
+                                             until: time(s.expires) })}
             </p>
             <p className="muted small">{t("adm_zo_memory_note")}</p>
             <div className="form-actions">
@@ -88,20 +92,27 @@ export default function ZededaSession() {
         ) : (
           <>
             <p><span className="pill warn">{t("adm_zo_not_logged_in_ui")}</span></p>
-            <p className="muted small">{t("adm_zo_login_text", { user: info.user || "-", enterprise: info.enterprise || "-",
-                                                                  cluster: info.cluster })}</p>
+            {withPassword ? (
+              <p className="muted small">{t("adm_zo_login_text", { user: info.user, enterprise: info.enterprise,
+                                                                    cluster: info.cluster })}</p>
+            ) : (
+              <p className="muted small">{t("adm_zo_login_token_text", { cluster: info.cluster })}</p>
+            )}
             <div className="fields">
               <label className="field">
-                <span className="field-label">{t("adm_zo_password")}</span>
-                <input type="password" autoComplete="off" value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && password) login({ password }); }} />
-              </label>
-              <label className="field">
                 <span className="field-label">{t("adm_zo_token")}</span>
-                <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
+                <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && token) login({ token }); }} />
                 <span className="field-help">{t("adm_zo_token_help")}</span>
               </label>
+              {withPassword && (
+                <label className="field">
+                  <span className="field-label">{t("adm_zo_password")}</span>
+                  <input type="password" autoComplete="off" value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && password) login({ password }); }} />
+                </label>
+              )}
             </div>
             <div className="form-actions">
               <button className="btn primary" disabled={busy || (!password && !token)}

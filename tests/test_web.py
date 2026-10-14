@@ -502,6 +502,24 @@ class ZededaWebTest(WebBase):
         status, body, _ = self.request("POST", "/api/zededa/login", {"token": "PASTED"})
         self.assertEqual((status, body["session"]["via"], body["session"]["user"]), (200, "token", "sso-user"))
 
+    def test_api_token_without_user_or_enterprise(self):
+        core.save_settings({"SERVER_IP": "auto", "ZEDEDA_ONBOARDING": "yes", "ZEDEDA_PROJECT": "netboot"})
+
+        class Anonymous(FakeZededa):
+            def check(self):
+                return {"user": "", "expires": None}
+
+        with mock.patch.object(web.zededa, "Client", Anonymous):
+            self.start_tls()
+            self.login()
+            status, body, _ = self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
+            self.assertEqual(status, 400)                      # a password needs user and enterprise
+            status, body, _ = self.request("POST", "/api/zededa/login", {"token": "SECRET-TOKEN"})
+            self.assertEqual((status, body["session"]["user"], body["session"]["enterprise"]),
+                             (200, "API token", "-"))
+            self.assertEqual(self.onboard()["eve_ob_ok"], "1")
+        self.assertEqual(FakeZededa.created[0][2], self.MAC)
+
     def test_boot_menu_registers_a_machine_once(self):
         self.start_tls()
         self.assertEqual(self.onboard()["eve_ob_ok"], "0")              # nobody logged in to ZEDEDA

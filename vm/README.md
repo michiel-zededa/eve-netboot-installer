@@ -424,13 +424,17 @@ for which you have to know which soft serial ended up on which machine. Here:
      and, preferably, **Edge Nodes: Read** (then a machine that is installed
      again is recognised instead of refused). Add **Edge Nodes: Delete** only
      if you want to delete nodes from the appliance. Nothing else is needed;
-   - a **local user** only for this, with that role (local: single sign-on
-     users cannot log in with a password through the API);
+   - a **user** only for this, with that role, and how the appliance logs in
+     as that user: with an **API token** of the user (nothing else is needed,
+     and it also works for single sign-on users), or with the user's
+     **password** (a local user; the appliance then also needs the user name
+     and the enterprise);
    - a **project without an application policy** (ZEDEDA refuses nodes
      without a model in a project with one), for example `onboarding`.
 2. In the web management or the console menu, *ZEDEDA onboarding*: switch it
    on and fill in the API address of your cluster (`zedcontrol.zededa.net` by
-   default), the enterprise, the user and the project. When the role may not
+   default) and the project; the user and the enterprise only to log in with
+   a password. When the role may not
    read projects, enter the project's ID instead of its name. The onboarding
    key is filled in with the default of the EVE-OS images from GitHub.
 3. Choose the **naming convention** of the nodes (*Node name*). A node cannot
@@ -456,12 +460,13 @@ for which you have to know which soft serial ended up on which machine. Here:
 
 **Each time you install machines:**
 
-1. *ZEDEDA onboarding* → **Log in to ZEDEDA** with the password of that user,
-   in the web management or in the console menu. The password is used for this
-   login only; the session is kept **in the VM's memory only**, never on disk
-   or in an export. It lasts 4 hours, and ends when the VM or the web
-   management restarts. Users with single sign-on paste a session token in the
-   web management instead.
+1. *ZEDEDA onboarding* → log in to ZEDEDA, in the web management or in the
+   console menu: paste the **API token** (*Log in with an API token* in the
+   console), or type the **password** of the user set in the settings. A
+   password is used for this login only; the token or session is kept **in
+   the VM's memory only**, never on disk or in an export, and is gone when
+   the VM or the web management restarts. A password session lasts 4 hours;
+   an API token as long as ZEDEDA lets it.
 2. Network boot the machines and choose an EVE-OS 17 (or later) image. Its
    summary shows *ZEDEDA: will be registered as …* and the choices
    **Install now [i]**, **Onboard in ZEDEDA: on [o]** and **Node name [n]**.
@@ -650,8 +655,8 @@ Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `
 - **Passwords in cloud-init:** `ADMIN_PASSWORD` is not stored in the VM's settings, but the hypervisor keeps the user-data. `ADMIN_PASSWORD_HASH` avoids a readable password there.
 - **Exports** contain no passwords or tokens and are available for 15 minutes only.
 - **ZEDEDA onboarding:**
-  - The ZEDEDA password is used for the login only. The session token is kept in the web management's memory, never on disk, in exports, diagnostics or logs; it is gone after a restart and expires after a few hours.
-  - Use a local ZEDEDA user only for this, with a role that may only create (and read) edge nodes: the session can do whatever that user can.
+  - The appliance logs in with an API token or a password. A password is used for the login only. The token or session is kept in the web management's memory, never on disk, in exports, diagnostics or logs; it is gone after a restart.
+  - Use a ZEDEDA user only for this, with a role that may only create (and read) edge nodes: the token or session can do whatever that user can.
   - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of port 8443; every other plain-HTTP request there is sent to HTTPS. That path can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Log out of ZEDEDA when the batch is installed.
   - Deleting nodes and the export need the admin login (web management) or the console menu. The console uses the web management's session through a key that only root can read and that is made new at every start of the web management (`/run`, memory only).
 

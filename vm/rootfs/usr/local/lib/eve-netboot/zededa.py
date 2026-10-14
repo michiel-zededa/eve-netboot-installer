@@ -119,8 +119,15 @@ class Client:
                 "role": role.get("name", "") if isinstance(role, dict) else str(role)}
 
     def check(self):
-        """Check the token (a pasted one): -> {"user": str, "expires": seconds or None}."""
-        _, a = self.call("GET", "/v1/sessions/self")
+        """Check a pasted API or session token: -> {"user": str, "expires": seconds or None}.
+        Only "not authenticated" (401) rejects it; an endpoint the token may not
+        use for this check is no reason to refuse it."""
+        try:
+            _, a = self.call("GET", "/v1/sessions/self")
+        except ZededaError as e:
+            if e.status in (0, 401):
+                raise
+            return {"user": "", "expires": None}
         token = a.get("token") if isinstance(a.get("token"), dict) else a
         user = a.get("username") or a.get("userName") or a.get("user") or a.get("userId") or ""
         return {"user": str(user), "expires": expires_seconds(token)}

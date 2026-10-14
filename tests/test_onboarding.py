@@ -81,6 +81,19 @@ class ClientTest(unittest.TestCase):
             zededa.Client("zedcontrol.example.net", token="T", opener=api).create_modelless("a", "a", "p", MAC, "k")
         self.assertEqual((e.exception.status, str(e.exception)), (400, "Invalid Model"))
 
+    def test_token_check(self):
+        api = FakeApi({("GET", "/v1/sessions/self"): (200, {"username": "u@example.net",
+                                                             "token": {"expires": "1792003034371309674"}})})
+        info = zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
+        self.assertEqual((info["user"], int(info["expires"])), ("u@example.net", 1792003034))
+        # an API token that may not read its session: accepted, without details
+        api = FakeApi({("GET", "/v1/sessions/self"): (403, {"error": [{"details": "forbidden"}]})})
+        self.assertEqual(zededa.Client("zedcontrol.example.net", token="T", opener=api).check(),
+                         {"user": "", "expires": None})
+        api = FakeApi({("GET", "/v1/sessions/self"): (401, {"cause": "UNAUTHENTICATED"})})
+        with self.assertRaises(zededa.ZededaError):
+            zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
+
     def test_lookup_by_serial(self):
         api = FakeApi({("GET", f"/v1/devices/serial/{MAC}"): (200, {"name": "eve-old"})})
         c = zededa.Client("zedcontrol.example.net", token="T", opener=api)
@@ -187,8 +200,12 @@ class SettingsTest(unittest.TestCase):
         s = {"ZEDEDA_ONBOARDING": "yes", "WEB_ADMIN": "no", "ZEDEDA_CLUSTER": "http://x",
              "ZEDEDA_ONBOARDING_KEY": "abc", "ZEDEDA_NODE_NAME": "fixed-name"}
         keys = sorted(k for k, _ in app.zededa_problems(s))
-        self.assertEqual(keys, ["ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_NODE_NAME", "ZEDEDA_ONBOARDING",
-                                "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_PROJECT", "ZEDEDA_USER"])
+        self.assertEqual(keys, ["ZEDEDA_CLUSTER", "ZEDEDA_NODE_NAME", "ZEDEDA_ONBOARDING",
+                                "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_PROJECT"])
+
+    def test_user_and_enterprise_only_for_a_password(self):
+        # an API token needs neither: they are not required settings
+        self.assertEqual(app.zededa_problems({"ZEDEDA_ONBOARDING": "yes", "ZEDEDA_PROJECT": "onboarding"}), [])
 
     def test_naming_convention(self):
         ok = {"ZEDEDA_ONBOARDING": "yes", "ZEDEDA_ENTERPRISE": "E", "ZEDEDA_USER": "u", "ZEDEDA_PROJECT": "p"}

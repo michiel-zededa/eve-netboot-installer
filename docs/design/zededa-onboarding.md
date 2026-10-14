@@ -95,9 +95,9 @@ sequenceDiagram
     participant W as VM web management (8443)
     participant M as Machine (iPXE)
     participant Z as ZEDEDA API
-    A->>W: log in to ZEDEDA (password used once)
-    W->>Z: POST /api/v1/login
-    Z-->>W: session token (kept in memory only)
+    A->>W: an API token, or a password (used once)
+    W->>Z: POST /api/v1/login (password) or check the token
+    Z-->>W: token (kept in memory only)
     M->>W: summary of an EVE-OS 17+ image: GET /ipxe/onboard?action=preview
     W-->>M: "will be registered as eve-<mac> in project <project>"
     M->>W: n: a name for this machine (optional)
@@ -109,7 +109,8 @@ sequenceDiagram
 
 1. **Settings** (`ZEDEDA_*`, VM settings, part of exports; none of them
    secret): `ZEDEDA_ONBOARDING` (off by default), `ZEDEDA_CLUSTER`
-   (`zedcontrol.zededa.net`), `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`,
+   (`zedcontrol.zededa.net`), `ZEDEDA_ENTERPRISE` and `ZEDEDA_USER` (only for
+   a login with a password),
    `ZEDEDA_PROJECT` (name or ID), `ZEDEDA_ONBOARDING_KEY` (the default key),
    `ZEDEDA_NODE_NAME` (the naming convention, `eve-{mac}`) and
    `ZEDEDA_NODE_NEXT` (the next sequence number, `1`). The same group in the
@@ -126,9 +127,12 @@ sequenceDiagram
    **n**, sent as `name=`) replaces the convention for that machine and takes
    no number. Every name is reduced to lower case letters, digits and
    hyphens, at most 63 characters.
-3. **Login, in memory only.** The web management's *ZEDEDA onboarding* page
-   logs in with the password, which is used for that request only, or checks
-   a pasted session token (single sign-on users cannot use `/login`). The
+3. **Login, in memory only.** With a pasted **API token** (or session token)
+   nothing else is needed; it is checked with `GET sessions/self`, where only
+   401 rejects it (an API token that may not read its session is taken as
+   it is). With a **password**, the user and enterprise from the settings
+   log in through `POST /api/v1/login` (local users only; single sign-on
+   users use a token); the password is used for that request only. The
    token is kept in the memory of the `eve-netboot web` process: never on
    disk, in exports, diagnostics or logs. It is gone after a restart and when
    it expires; onboarding then stops until someone logs in again. The project
@@ -171,7 +175,7 @@ sequenceDiagram
 
 ## Safety
 
-- The token can do whatever its user can, so a **dedicated local ZEDEDA user**
+- The token can do whatever its user can, so a **dedicated ZEDEDA user**
   is used for nothing else, with a custom role that may only create (and read)
   edge nodes:
 

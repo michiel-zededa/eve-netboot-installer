@@ -139,7 +139,7 @@ sequenceDiagram
     participant C as Machine (iPXE)
     participant Z as ZEDEDA
     A->>V: log in to ZEDEDA (web management)
-    V->>Z: login, session token kept in memory only
+    V->>Z: API token or login, kept in memory only
     C->>V: choose an EVE-OS 17+ image: summary
     Note over C: ZEDEDA: will be registered as eve-(MAC address)
     C->>V: i: register this MAC address
@@ -181,7 +181,7 @@ design and the ZEDEDA API it uses:
 - 1 vCPU and 1 GB RAM at least (2 and 2 GB recommended), a 16 GB disk (32 GB for more releases and ISOs).
 - A bridged network in the same layer-2 network (VLAN) as the machines to install, not NAT.
 - Details: [vm/README.md: what the VM needs](vm/README.md#2-what-the-vm-needs).
-- **For ZEDEDA onboarding** (optional): outbound HTTPS to your ZEDEDA cluster's API, a local ZEDEDA user with a role that may create (and read) edge nodes, a project without an application policy, and EVE-OS 17.0.0-lts or later images.
+- **For ZEDEDA onboarding** (optional): outbound HTTPS to your ZEDEDA cluster's API, a ZEDEDA user with a role that may create (and read) edge nodes (an API token of it, or its password), a project without an application policy, and EVE-OS 17.0.0-lts or later images.
 
 **Docker Compose host**
 
@@ -366,8 +366,8 @@ How the translations work:
   - The stack never installs without an explicit key press.
 - **Integrity:** GitHub downloads are checked against the sha256 published with each release.
 - **ZEDEDA onboarding** (VM appliance):
-  - The ZEDEDA password is used for the login only; the session token is kept in the memory of the web management, never on disk, in exports, diagnostics or logs. It is gone after a restart and expires after a few hours.
-  - Use a local ZEDEDA user only for this, with a role that may only create (and read) edge nodes, such as a custom role with *Edge Nodes: Create* and *Read*; add *Delete* only to delete nodes from the appliance. The session can do whatever that user can.
+  - The appliance logs in with an API token or a password; a password is used for the login only. The token or session is kept in the memory of the web management, never on disk, in exports, diagnostics or logs, and is gone after a restart.
+  - Use a ZEDEDA user only for this, with a role that may only create (and read) edge nodes, such as a custom role with *Edge Nodes: Create* and *Read*; add *Delete* only to delete nodes from the appliance. The session can do whatever that user can.
   - Deleting nodes and the export need the admin login or the console. The list of onboarded machines on the VM holds no secrets.
   - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of the management port. It can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Anyone in the boot network can send that request, so log out of ZEDEDA when the batch is installed.
 

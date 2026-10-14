@@ -371,7 +371,8 @@ def zededa_problems(s):
     if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+",
                         get(s, "ZEDEDA_CLUSTER")):
         errors.append(("ZEDEDA_CLUSTER", tr("adm_err_zededa_cluster")))
-    for k in ("ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT"):
+    # user and enterprise only for a login with a password (an API token needs neither)
+    for k in ("ZEDEDA_PROJECT",):
         if not get(s, k).strip():
             errors.append((k, tr("adm_err_zededa_empty", setting=label(k))))
     if not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
@@ -1604,6 +1605,8 @@ def screen_zededa(s):
             state = tr("adm_zo_state_off")
         elif status != 200:
             state = info.get("error") or tr("adm_zo_web_down")
+        elif session and session.get("via") == "token":
+            state = tr("adm_zo_logged_in") + " " + tr("adm_zo_session_token_text", cluster=session["cluster"])
         elif session:
             state = tr("adm_zo_logged_in") + " " + tr(
                 "adm_zo_session_text", user=session["user"], enterprise=session["enterprise"],
@@ -1612,7 +1615,13 @@ def screen_zededa(s):
             state = tr("adm_zo_not_logged_in_ui")
         items = [("settings", tr("adm_zo_settings"))]
         if on and status == 200:
-            items.append(("logout", tr("adm_zo_logout")) if session else ("login", tr("adm_zo_login")))
+            if session:
+                items.append(("logout", tr("adm_zo_logout")))
+            else:
+                # a password needs the user and enterprise; an API token needs nothing else
+                if get(cur, "ZEDEDA_USER") and get(cur, "ZEDEDA_ENTERPRISE"):
+                    items.append(("login", tr("adm_zo_login")))
+                items.append(("token", tr("adm_zo_login_token")))
         if nodes:
             items += [("nodes", f"{tr('adm_zo_onboarded')} ({len(nodes)})"), ("export", tr("adm_zo_export"))]
         try:
@@ -1631,12 +1640,12 @@ def screen_zededa(s):
                                    cluster=get(cur, "ZEDEDA_CLUSTER")), password=True)
                 code, answer = web_api("POST", "/api/zededa/login", {"password": pw})
                 del pw
-                if code == 200:
-                    msg(title, answer.get("warning") or tr("adm_zo_logged_in"),
-                        tone="warn" if answer.get("warning") else "ok")
-                else:
-                    msg(title, answer.get("error", str(answer)) if isinstance(answer, dict) else str(answer),
-                        tone="err")
+                zededa_login_result(title, code, answer)
+            elif c == "token":
+                token = ask(title, tr("adm_zo_token_prompt"), password=True).strip()
+                code, answer = web_api("POST", "/api/zededa/login", {"token": token})
+                del token
+                zededa_login_result(title, code, answer)
             elif c == "logout":
                 web_api("POST", "/api/zededa/logout", {})
             elif c == "nodes":
@@ -1655,6 +1664,13 @@ def screen_zededa(s):
                               share=f"\\\\{primary_ip() or 'VM'}\\eve-import\\{name}"), tone="ok")
         except Cancel:
             continue
+
+
+def zededa_login_result(title, code, answer):
+    if code == 200:
+        msg(title, answer.get("warning") or tr("adm_zo_logged_in"), tone="warn" if answer.get("warning") else "ok")
+    else:
+        msg(title, answer.get("error", str(answer)) if isinstance(answer, dict) else str(answer), tone="err")
 
 
 def screen_zededa_nodes(title, nodes, logged_in):

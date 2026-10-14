@@ -110,8 +110,9 @@ and the UI type check + build.
   docs/design/zededa-onboarding.md): nodes are created without a model
   (`POST /api/v1/devices/model-less`), so only for images of EVE-OS
   17.0.0-lts and later; the menu option exists only in the summary of those
-  images. Serial = soft serial = the MAC address. The ZEDEDA password is used
-  for the login request only and the session token lives in the web
+  images. Serial = soft serial = the MAC address. Login with an API token
+  (needs nothing else) or a password (needs ZEDEDA_USER and _ENTERPRISE, used
+  for the login request only); the token lives in the web
   process's memory only: never in settings, exports, diagnostics, logs or API
   answers (tested). `/ipxe/onboard` is the only path served without TLS
   (`PlainHandler`); it may only create nodes. The role it needs: Edge Nodes
