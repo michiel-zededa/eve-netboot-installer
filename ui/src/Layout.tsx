@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Archive, ChevronDown, CloudDownload, Disc3, Download, HardDrive, House, KeyRound, Languages, Layers,
+  Archive, ChevronDown, CloudDownload, CloudUpload, Disc3, Download, HardDrive, House, KeyRound, Languages, Layers,
   LogOut, Menu, Router, Monitor, Moon, Network, RefreshCw, ScrollText, Search, Server, Settings2, Share2, ShieldCheck, Sun,
   Wrench, X,
 } from "lucide-react";
@@ -110,6 +110,7 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
                 <NavItem to={{ page: "settings", section: "bootmenu" }} route={route} icon={<Languages size={20} />} label={t("adm_sec_bootmenu")} />
                 <NavItem to={{ page: "settings", section: "defaults" }} route={route} icon={<HardDrive size={20} />} label={t("adm_sec_defaults")} />
                 <NavItem to={{ page: "settings", section: "share" }} route={route} icon={<Share2 size={20} />} label={t("adm_sec_share")} />
+                <NavItem to={{ page: "settings", section: "zededa" }} route={route} icon={<CloudUpload size={20} />} label={t("adm_sec_zededa")} />
                 <NavItem to={{ page: "settings", section: "access" }} route={route} icon={<ShieldCheck size={20} />} label={t("adm_sec_access")} />
               </NavGroup>
               <NavGroup label={t("adm_nav_maintenance")}>

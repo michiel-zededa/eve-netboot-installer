@@ -381,7 +381,7 @@ SSH session. On the VM's screen, `exit` returns to the status screen.
 | Menu item | Does |
 |---|---|
 | Status | Everything on one screen |
-| Network, Server address, DHCP service, What to mirror, Language and boot menu, Installer defaults, SMB share, Access and system | The same groups of settings as the pages of the web management: a list of the settings with their values; **Enter** changes one, **Done** applies the changes |
+| Network, Server address, DHCP service, What to mirror, Language and boot menu, Installer defaults, SMB share, ZEDEDA onboarding, Access and system | The same groups of settings as the pages of the web management: a list of the settings with their values; **Enter** changes one, **Done** applies the changes |
 | Check GitHub now | Normally this happens at the set interval (every day) |
 | Logs | The mirror (sync), TFTP, web server, DHCP, appliance or system log |
 | Export settings / Import settings | See [step 9](#9-replace-the-vm-with-a-newer-version) |
@@ -390,6 +390,56 @@ SSH session. On the VM's screen, `exit` returns to the status screen.
 
 The status page `http://<VM address>:8080/` lists every release and ISO the
 VM offers.
+
+### Onboard installed machines in ZEDEDA
+
+> [!NOTE]
+> Test version (branch `feature/zededa-onboarding`, pre-releases
+> `1.7.0-rc.*`). The design and test results are in
+> [docs/design/zededa-onboarding.md](../docs/design/zededa-onboarding.md).
+
+**The idea:** install EVE-OS on a number of machines at the same time over the
+network, and have them onboarded in ZEDEDA in the same go, without looking up
+a single serial number. Normally every node has to be added in ZEDEDA with its
+serial number: the hardware serial from a label or the BIOS, or a soft serial,
+for which you have to know which soft serial ended up on which machine. Here:
+
+1. The boot menu gives every machine its **MAC address as soft serial**; the
+   VM knows that MAC address when the machine boots.
+2. When you press **i** to install, the VM creates the edge node in ZEDEDA with
+   that serial, **without a model**: EVE-OS 17.0.0-lts and later report their
+   own hardware when they first connect.
+3. All nodes go into one **onboarding project**. Once they are online, move
+   them to the project they belong in.
+4. *ZEDEDA onboarding* in the web management lists which MAC address, hardware
+   serial and product became which node, so you can tell the machines apart.
+
+**Set it up once:**
+
+1. In ZEDEDA, create a **local user** only for this, with the **SysManager**
+   role, and a **project without an application policy** (ZEDEDA refuses nodes
+   without a model in a project with one), for example `onboarding`.
+2. In the web management, *ZEDEDA onboarding*: switch it on and fill in the API
+   address of your cluster (`zedcontrol.zededa.net` by default), the
+   enterprise, the user and the project. The onboarding key is filled in
+   with the default of the EVE-OS images from GitHub.
+
+**Each time you install machines:**
+
+1. Web management → *ZEDEDA onboarding* → **Log in to ZEDEDA** with the
+   password of that user. The password is used for this login only; the
+   session is kept **in the VM's memory only**, never on disk or in an export.
+   It lasts 4 hours, and ends when the VM or the web management restarts.
+   Users with single sign-on paste a session token instead.
+2. Network boot the machines and choose an EVE-OS 17 (or later) image. The
+   summary shows *ZEDEDA: will be registered as eve-…* ; press **i**.
+3. The overview on the same page fills while the machines install. After
+   their first boot the nodes come online in the onboarding project; assign
+   their adapters to network instances and move them to their own project.
+
+The option *Onboard in ZEDEDA* (installation options, on by default) turns it
+off for one machine. Older EVE-OS images, a switched-off soft serial or nobody
+logged in: the machine is installed but not onboarded, and the summary says why.
 
 ---
 

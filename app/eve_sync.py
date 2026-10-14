@@ -93,6 +93,12 @@ VERSION = _env("ENI_VERSION", "dev")
 ADMIN_URL = _env("ENI_ADMIN_URL")
 # the VM appliance's own DHCP service (off / proxy / server); a plain compose host has none
 DHCP_MODE = _env("ENI_DHCP_MODE", "off")
+# the VM appliance registers installed machines in ZEDEDA (model-less, EVE-OS
+# 17+) at this address; empty = no onboarding option in the menu
+ONBOARD_URL = _env("ENI_ONBOARD_URL")
+if ONBOARD_URL and not re.fullmatch(r"http://[A-Za-z0-9.\-\[\]:]+/[A-Za-z0-9/_.-]+", ONBOARD_URL):
+    ONBOARD_URL = ""
+ONBOARD_MIN_MAJOR = 17
 BASE_URL = _env("ENI_BASE_URL").rstrip("/")
 ARCHES = _env("EVE_ARCHES", "amd64").split()
 FLAVOURS = _env("EVE_FLAVOURS", "kvm").split()
@@ -801,6 +807,8 @@ def render_menu(entries, github_checked):
     a(f"set eve_serial {D['serial']}")
     a(f"set eve_nuke {int(D['nuke'])}")
     a("set eve_pause 0")
+    if ONBOARD_URL:
+        a("set eve_onboard 1")
     a("set eve_debug 0")
     a("set eve_blackbox 0")
     for var, key in (("eve_disk", "disk"), ("eve_persist", "persist"),
@@ -879,15 +887,81 @@ def render_menu(entries, github_checked):
         a(f"set eve_netboot {1 if e.get('netboot_ok') else 0}")
         a(f"set eve_isomb {e.get('iso_size', 0) >> 20}")
         a(f"set eve_k {1 if var == 'k' else 0}")
+        if ONBOARD_URL:
+            a(f"set eve_rel_ok {1 if release_major(e) >= ONBOARD_MIN_MAJOR else 0}")
         a("goto eve_confirm")
         a("")
-    a(fill(MENU_TAIL))
+    a(fill(onboard_parts(MENU_TAIL)))
     if not STANDALONE:
         # back to the calling iPXE menu: give it iPXE's own colours again
         L[-1] = L[-1].replace(":eve_exit\n", ":eve_exit\n" + "".join(
             f"cpair --foreground {fg} --background {bg} {pair}\n" for pair, fg, bg in
             ((0, 9, 9), (1, 7, 4), (2, 7, 1), (3, 6, 4), (4, 0, 6), (5, 7, 1), (6, 6, 4))))
     return "\n".join(L) + "\n"
+
+
+def release_major(e):
+    """Major EVE-OS version of an entry (0 when unknown)."""
+    m = re.match(r"(\d+)\.", str(e.get("tag") or e.get("release") or ""))
+    return int(m.group(1)) if m else 0
+
+
+ONBOARD_QUERY = ("mac=${mac:hexhyp}&serial=${serial:uristring}&product=${product:uristring}")
+
+
+def onboard_parts(template):
+    """Put the onboarding pieces in the menu (or drop their markers)."""
+    parts = {"#@ONBOARD_STATUS": "", "#@ONBOARD_ITEM": "", "#@ONBOARD_TOGGLE": "", "#@ONBOARD_CHECK": "",
+             "#@ONBOARD_SUMMARY": "", "#@ONBOARD_REGISTER": ""}
+    if ONBOARD_URL:
+        url = ONBOARD_URL + "?action="
+        parts.update({
+            "#@ONBOARD_STATUS": "iseq ${eve_onboard} 1 && set eve_onboard_s @@val_on@@ || "
+                                "set eve_onboard_s @@val_off@@",
+            "#@ONBOARD_ITEM": "item eve_o_onboard ${eve_sp}@@opt_onboard@@: ${eve_onboard_s}",
+            "#@ONBOARD_TOGGLE": ":eve_o_onboard\n"
+                                "iseq ${eve_onboard} 1 && set eve_onboard 0 || set eve_onboard 1\n"
+                                "goto eve_opt",
+            # whether this installation will be onboarded, shown in the summary
+            "#@ONBOARD_CHECK": "\n".join([
+                "set eve_ob_do 0",
+                "clear eve_ob_s",
+                "iseq ${eve_onboard} 1 || goto eve_ob_checked",
+                "iseq ${eve_rel_ok} 1 || goto eve_ob_old",
+                "iseq ${eve_softserial} 1 || goto eve_ob_nosoft",
+                "set eve_ob_ok 0",
+                "set eve_ob_s @@ob_unreachable@@",
+                f"chain --autofree {url}preview&{ONBOARD_QUERY} ||",
+                "iseq ${eve_ob_ok} 1 && set eve_ob_do 1 ||",
+                "goto eve_ob_checked",
+                ":eve_ob_old",
+                "set eve_ob_s @@ob_needs_new@@",
+                "goto eve_ob_checked",
+                ":eve_ob_nosoft",
+                "set eve_ob_s @@ob_needs_soft@@",
+                ":eve_ob_checked"]),
+            "#@ONBOARD_SUMMARY": "isset ${eve_ob_s} && echo  @@conf_onboard@@: ${eve_ob_s} ||",
+            # registered only now, after i: the node exists before EVE-OS first boots
+            "#@ONBOARD_REGISTER": "\n".join([
+                "iseq ${eve_ob_do} 1 || goto eve_ob_done",
+                "echo @@boot_onboard@@",
+                "set eve_ob_ok 0",
+                "set eve_ob_s @@ob_unreachable@@",
+                f"chain --autofree {url}register&{ONBOARD_QUERY} ||",
+                "iseq ${eve_ob_ok} 1 && echo  ${eve_ob_s} ||",
+                "iseq ${eve_ob_ok} 1 || echo  ${eve_esc}[31m${eve_ob_s}${eve_esc}[37m",
+                "iseq ${eve_ob_ok} 1 || prompt @@ob_continue@@ ||",
+                ":eve_ob_done"]),
+        })
+    out = []
+    for line in template.split("\n"):
+        key = line.strip()
+        if key in parts:
+            if parts[key]:
+                out.append(parts[key])
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 MENU_TAIL = r"""# ---- options menu
@@ -901,6 +975,7 @@ iseq ${eve_nuke} 1 && set eve_nuke_s @@val_yes@@ || set eve_nuke_s @@val_no@@
 iseq ${eve_pause} 1 && set eve_pause_s @@val_on@@ || set eve_pause_s @@val_off@@
 iseq ${eve_debug} 1 && set eve_debug_s @@val_on@@ || set eve_debug_s @@val_off@@
 iseq ${eve_blackbox} 1 && set eve_bb_s @@val_bb_yes@@ || set eve_bb_s @@val_no@@
+#@ONBOARD_STATUS
 iseq ${eve_serial} none && set eve_serial_s @@val_none@@ || set eve_serial_s ${eve_serial}
 isset ${eve_extra} && set eve_extra_s ${eve_extra} || set eve_extra_s -
 menu @@opt_title@@
@@ -911,6 +986,7 @@ item eve_o_server ${eve_sp}@@opt_server@@: ${eve_server_s}
 item --gap @@opt_gap_behaviour@@
 item eve_o_reboot ${eve_sp}@@opt_reboot@@: ${eve_reboot_s}
 item eve_o_soft ${eve_sp}@@opt_soft@@: ${eve_soft_s}
+#@ONBOARD_ITEM
 item eve_o_nuke ${eve_sp}@@opt_nuke@@: ${eve_nuke_s}
 item eve_o_pause ${eve_sp}@@opt_pause@@: ${eve_pause_s}
 item eve_o_debug ${eve_sp}@@opt_debug@@: ${eve_debug_s}
@@ -949,6 +1025,7 @@ goto eve_opt
 :eve_o_soft
 iseq ${eve_softserial} 1 && set eve_softserial 0 || set eve_softserial 1
 goto eve_opt
+#@ONBOARD_TOGGLE
 :eve_o_nuke
 iseq ${eve_nuke} 1 && set eve_nuke 0 || set eve_nuke 1
 goto eve_opt
@@ -991,6 +1068,7 @@ iseq ${eve_debug} 1 && set eve_opts ${eve_opts} eve_install_debug=true linuxkit.
 iseq ${eve_blackbox} 1 && set eve_opts ${eve_opts} eve_blackbox ||
 clear eve_conx
 iseq ${eve_serial} none || set eve_conx console=${eve_serial},115200n8
+#@ONBOARD_CHECK
 echo ${cls}
 echo ${eve_esc}[33m===========================================================================
 echo ${eve_esc}[37m ${eve_title}
@@ -1000,6 +1078,7 @@ echo  ISO: @@conf_iso_ram@@
 echo  @@conf_options@@: ${eve_opts}
 isset ${eve_conx} && echo  @@conf_console@@: ${eve_con} ${eve_conx} ||
 isset ${eve_extra} && echo  @@conf_extra@@: ${eve_extra} ||
+#@ONBOARD_SUMMARY
 iseq ${eve_k} 1 && echo  ${eve_esc}[33m@@conf_note@@: @@conf_k_warn@@${eve_esc}[37m ||
 echo
 iseq ${eve_blackbox} 1 && echo  @@conf_bb@@ ||
@@ -1009,6 +1088,7 @@ echo
 prompt --key i @@conf_press_i@@ && goto eve_boot || goto eve_menu
 
 :eve_boot
+#@ONBOARD_REGISTER
 imgfree
 echo
 echo @@boot_kernel@@

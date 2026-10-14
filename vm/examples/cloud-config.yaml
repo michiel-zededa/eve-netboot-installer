@@ -67,6 +67,17 @@ eve_netboot:
   # DHCP_DNS: 192.168.1.1 1.1.1.1
   # DHCP_LEASE_TIME: 12h
 
+  # ----------------------------------------------- ZEDEDA onboarding --
+  # register installed machines in ZEDEDA (EVE-OS 17+, no model); log in to
+  # ZEDEDA in the web management (memory only); see eve-netboot.env
+  ZEDEDA_ONBOARDING: "no"
+  # ZEDEDA_CLUSTER: zedcontrol.zededa.net
+  # ZEDEDA_ENTERPRISE: my-enterprise
+  # ZEDEDA_USER: eve-netboot-onboarding
+  # ZEDEDA_PROJECT: netboot
+  # ZEDEDA_ONBOARDING_KEY: 5d0767ee-0547-4569-b530-387e526f8cb9
+  # ZEDEDA_NODE_NAME: eve-{mac}
+
   # ======================================================= PXE server ==
   SERVER_IP: auto
   HTTP_PORT: 8080

@@ -7,7 +7,8 @@ import type { SettingsInfo } from "./admin";
 import type { Field, FieldType, Values } from "./forms";
 import { has, type TFunc } from "./i18n";
 
-export type SectionId = "network" | "server" | "dhcp" | "mirror" | "bootmenu" | "defaults" | "share" | "access";
+export type SectionId =
+  "network" | "server" | "dhcp" | "mirror" | "bootmenu" | "defaults" | "share" | "zededa" | "access";
 
 export interface Section {
   id: SectionId;
@@ -125,6 +126,21 @@ export const SECTIONS: Section[] = [
       field(t, "SMB_PASSWORD", "secret", { showIf: yes("SMB_IMPORT_SHARE"),
         placeholder: info?.secrets.smb_password ? t("adm_unchanged") : t("adm_required") }),
     ],
+  },
+  {
+    id: "zededa",
+    fields: (_info, t) => {
+      const on = yes("ZEDEDA_ONBOARDING");
+      return [
+        field(t, "ZEDEDA_ONBOARDING", "yesno"),
+        field(t, "ZEDEDA_CLUSTER", "text", { showIf: on, placeholder: "zedcontrol.zededa.net" }),
+        field(t, "ZEDEDA_ENTERPRISE", "text", { showIf: on }),
+        field(t, "ZEDEDA_USER", "text", { showIf: on }),
+        field(t, "ZEDEDA_PROJECT", "text", { showIf: on }),
+        field(t, "ZEDEDA_ONBOARDING_KEY", "text", { showIf: on }),
+        field(t, "ZEDEDA_NODE_NAME", "text", { showIf: on, placeholder: "eve-{mac}" }),
+      ];
+    },
   },
   {
     id: "access",

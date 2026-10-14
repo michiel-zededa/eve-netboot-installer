@@ -5,9 +5,27 @@ release.
 
 ## Goal
 
-A machine that is installed from the boot menu shows up in ZEDEDA as an edge
-node without anyone typing its serial number into the ZEDEDA UI. Optional, off
-by default, VM appliance only (it needs the web management).
+Install EVE-OS on a number of machines at the same time over the network, and
+have them onboarded in the controller in the same go.
+
+Today every node has to be added in ZEDEDA by hand with its serial number. The
+hardware serial has to be found on each machine (label, BIOS); a soft serial
+is even harder: you have to know which soft serial ended up on which machine,
+which means checking each machine's console after the installation. With this
+feature nobody has to look up a serial number at all:
+
+- the boot menu gives every machine its MAC address as soft serial, and the
+  boot server knows that MAC address when the machine boots;
+- the boot server creates the edge node in ZEDEDA with that serial when the
+  installation starts, so the node is waiting when EVE-OS registers;
+- all nodes go into one **onboarding project** (a project without an
+  application policy, which model-less nodes need). Once they are online you
+  move them to the project they belong in;
+- the web management lists which MAC address, hardware serial and product
+  became which node, so you can tell the machines apart before moving them.
+
+Optional, off by default, VM appliance only (it needs the web management,
+where the ZEDEDA session lives).
 
 ## What we know
 

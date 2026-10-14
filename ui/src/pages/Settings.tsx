@@ -5,6 +5,7 @@ import { Card, PageHeader } from "../components";
 import { errorText, Fields, RollbackDialog, SaveStatus, useSaver, type Values } from "../forms";
 import { useT } from "../i18n";
 import { SECTIONS, type SectionId } from "../sections";
+import ZededaSession from "./ZededaSession";
 
 export default function Settings({ section, onSaved }: { section: SectionId; onSaved?: () => void }) {
   const t = useT();
@@ -53,6 +54,7 @@ export default function Settings({ section, onSaved }: { section: SectionId; onS
           <SaveStatus state={state} />
         </div>
       </Card>
+      {def.id === "zededa" && <ZededaSession key={state.phase} />}
       {state.phase === "rollback" && (
         <RollbackDialog result={state.result} onClose={() => { reset(); setChanges({}); load(); }} />
       )}

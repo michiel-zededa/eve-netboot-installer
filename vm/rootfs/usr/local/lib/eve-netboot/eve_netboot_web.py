@@ -19,6 +19,11 @@ Security
 - Before the appliance is set up, /api/setup is open (first come, first
   served: the owner's decision for headless VMs). Afterwards it is closed.
 - Not running at all when WEB_ADMIN=no.
+- ZEDEDA onboarding: the session with the controller (token) lives in this
+  process's memory only: never on disk, in exports or diagnostics; gone after
+  a restart. The one plain-HTTP path, /ipxe/onboard, is for the boot menu
+  (iPXE has no TLS): it can only create a node for a MAC address, at most once
+  per MAC, rate limited, and only while someone is logged in to ZEDEDA.
 
 `core` is the eve-netboot module (/usr/local/sbin/eve-netboot); everything
 that changes the system goes through its functions, exactly like the console.
@@ -41,7 +46,10 @@ import tarfile
 import threading
 import time
 import traceback
+import unicodedata
 import urllib.parse
+
+import zededa
 
 TLS_DIR = "/etc/eve-netboot/tls"
 SESSION_IDLE = 2 * 3600
@@ -52,6 +60,9 @@ MAX_JSON = 1 << 20
 SECRET_KEYS = ("ADMIN_PASSWORD", "SMB_PASSWORD", "ENI_GITHUB_TOKEN")
 NETWORK_KEYS = ("NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "WEB_ADMIN_PORT")
 UPLOAD_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.iso$")
+MAC_RE = re.compile(r"^[0-9a-f]{2}(-[0-9a-f]{2}){5}$")
+ONBOARD_PER_MINUTE = 60     # registrations from the boot menu, all machines together (batch installs)
+ONBOARD_KEEP = 200          # nodes remembered for the overview
 
 
 class HttpError(Exception):
@@ -88,6 +99,35 @@ class App:
         self.jobs = {}
         self.job = None         # the running job (one at a time)
         self.rollback = None    # {"token", "deadline", "previous", "timer"}
+        # ZEDEDA: memory only. {"token", "expires", "user", "enterprise", "cluster", "via", "since"}
+        self.zededa = None
+        self.onboarded = []     # newest first: {"mac", "name", "serial", "result", "message", "time"}
+        self.onboard_times = []
+
+    # ---- ZEDEDA session (memory only)
+    def zededa_session(self):
+        """The active session, or None (also drops an expired one)."""
+        z = self.zededa
+        if z and z.get("expires") and z["expires"] <= time.time():
+            self.zededa = None
+            self.core.log("web: ZEDEDA session expired")
+            return None
+        return z
+
+    def onboard_allowed(self):
+        now = time.time()
+        with self.lock:
+            self.onboard_times = [t for t in self.onboard_times if now - t < 60]
+            if len(self.onboard_times) >= ONBOARD_PER_MINUTE:
+                return False
+            self.onboard_times.append(now)
+            return True
+
+    def remember(self, entry):
+        with self.lock:
+            self.onboarded = [e for e in self.onboarded if e["mac"] != entry["mac"]]
+            self.onboarded.insert(0, entry)
+            del self.onboarded[ONBOARD_KEEP:]
 
     # ---- sessions
     def new_session(self):
@@ -198,6 +238,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def core(self):
         return self.app.core
 
+    # a plain-HTTP connection on the HTTPS port (PlainHandler): only /ipxe/onboard
+    plain = False
+
     def client_ip(self):
         return self.client_address[0]
 
@@ -296,6 +339,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ---- GET
     def get(self):
         path, query = self.route()
+        if self.plain:
+            if path == "/ipxe/onboard":
+                return self.ipxe_onboard(query)
+            raise HttpError(404, "Use https.")
         if not path.startswith("/api/"):
             return self.static(path)
         if path == "/api/session":
@@ -319,6 +366,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/export":
             return self.send(200, self.core.render_export(self.core.load_settings()), "text/plain; charset=utf-8",
                              {"Content-Disposition": 'attachment; filename="eve-netboot-settings.txt"'})
+        if path == "/api/zededa":
+            return self.send(200, self.zededa_info())
         if path == "/api/diagnostics":
             name = f"eve-netboot-diagnostics-{datetime.datetime.now():%Y%m%d-%H%M}.tar.gz"
             return self.send(200, self.diagnostics(), "application/gzip",
@@ -389,6 +438,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- POST / DELETE
     def change(self, method):
+        if self.plain:
+            raise HttpError(404, "Use https.")
         if self.headers.get("X-ENI") != "1":
             raise HttpError(403, "Missing X-ENI header.")
         path, query = self.route()
@@ -416,6 +467,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.action(path.rsplit("/", 1)[-1])
         if method == "POST" and path == "/api/upload":
             return self.upload(query.get("name", [""])[0], query.get("overwrite", ["0"])[0] == "1")
+        if method == "POST" and path == "/api/zededa/login":
+            return self.zededa_login()
+        if method == "POST" and path == "/api/zededa/logout":
+            return self.zededa_logout()
         if method == "DELETE" and path == "/api/images":
             return self.delete_image(query.get("file", [""])[0])
         raise HttpError(404, "Unknown API.")
@@ -616,6 +671,123 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, {"ok": True})
         raise HttpError(404, "Unknown action.")
 
+    # ---- ZEDEDA onboarding
+    def zededa_info(self):
+        c = self.core
+        s = c.load_settings()
+        z = self.app.zededa_session()
+        return {
+            "enabled": c.get(s, "ZEDEDA_ONBOARDING") == "yes",
+            "cluster": c.get(s, "ZEDEDA_CLUSTER"),
+            "enterprise": c.get(s, "ZEDEDA_ENTERPRISE"),
+            "user": c.get(s, "ZEDEDA_USER"),
+            "project": c.get(s, "ZEDEDA_PROJECT"),
+            "session": None if not z else {
+                "user": z["user"], "enterprise": z["enterprise"], "cluster": z["cluster"], "via": z["via"],
+                "since": z["since"], "expires": z.get("expires"), "project_id": z.get("project_id", "")},
+            "onboarded": list(self.app.onboarded),
+        }
+
+    def zededa_login(self):
+        """Log in with a password (used once, never kept) or check a pasted
+        session token. Either way the token stays in this process's memory."""
+        c = self.core
+        s = c.load_settings()
+        body = self.json_body()
+        cluster = str(body.get("cluster") or c.get(s, "ZEDEDA_CLUSTER")).strip()
+        enterprise = str(body.get("enterprise") or c.get(s, "ZEDEDA_ENTERPRISE")).strip()
+        user = str(body.get("user") or c.get(s, "ZEDEDA_USER")).strip()
+        password = str(body.get("password") or "")
+        pasted = str(body.get("token") or "").strip()
+        project = c.get(s, "ZEDEDA_PROJECT").strip()
+        try:
+            if pasted:
+                client = zededa.Client(cluster, token=pasted)
+                info = client.check()
+                session = {"token": pasted, "expires": info["expires"], "user": info["user"] or user,
+                           "via": "token"}
+            else:
+                if not (enterprise and user and password):
+                    raise HttpError(400, c.tr("adm_zo_need_login"))
+                client = zededa.Client(cluster)
+                info = client.login(user, password, enterprise)
+                client.token = info["token"]
+                session = {"token": info["token"], "expires": info["expires"], "user": user, "via": "password"}
+            del password
+            proj = client.project(project) if project else {}
+        except zededa.ZededaError as e:
+            c.log(f"web: ZEDEDA login to {cluster} failed: {e}")
+            raise HttpError(400 if e.status else 502, c.tr("adm_zo_login_failed", error=str(e))) from None
+        warning = ""
+        if proj and (proj.get("appPolicy") or proj.get("deployment")):
+            warning = c.tr("adm_zo_policy_warning", project=project)
+        session.update({"enterprise": enterprise, "cluster": cluster, "since": time.time(),
+                        "project_id": proj.get("id", "")})
+        self.app.zededa = session
+        c.log(f"web: logged in to ZEDEDA {cluster} as {session['user']} ({session['via']})")
+        self.send(200, {"ok": True, "warning": warning, **self.zededa_info()})
+
+    def zededa_logout(self):
+        z = self.app.zededa
+        self.app.zededa = None
+        if z:
+            zededa.Client(z["cluster"], token=z["token"]).logout()
+            self.core.log(f"web: logged out of ZEDEDA {z['cluster']}")
+        self.send(200, {"ok": True})
+
+    def ipxe_onboard(self, query):
+        """GET /ipxe/onboard?action=preview|register&mac=&serial=&product=
+        (plain HTTP, from the boot menu). Answers an iPXE script that sets
+        eve_ob_ok (1/0) and eve_ob_s (one line of text for the summary)."""
+        c = self.core
+        q = {k: (v[0] if v else "") for k, v in query.items()}
+        action = q.get("action", "preview")
+        mac = q.get("mac", "").lower()
+        s = c.load_settings()
+
+        def answer(ok, text):
+            safe = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode()
+            safe = re.sub(r"[^A-Za-z0-9 .,:;()/@_+'-]", " ", safe)
+            safe = re.sub(r"\s+", " ", safe).strip()[:120] or "-"
+            self.send(200, f"#!ipxe\nset eve_ob_ok {1 if ok else 0}\nset eve_ob_s {safe}\n", "text/plain")
+
+        if c.get(s, "ZEDEDA_ONBOARDING") != "yes":
+            return answer(False, c.tr("adm_zo_off"))
+        if action not in ("preview", "register") or not MAC_RE.match(mac):
+            return answer(False, c.tr("adm_zo_bad_request"))
+        z = self.app.zededa_session()
+        if not z:
+            return answer(False, c.tr("adm_zo_not_logged_in"))
+        hw_serial = q.get("serial", "")[:64]
+        name = zededa.node_name(c.get(s, "ZEDEDA_NODE_NAME"), mac, hw_serial)
+        project = c.get(s, "ZEDEDA_PROJECT")
+        if action == "preview":
+            return answer(True, c.tr("adm_zo_preview", name=name, project=project))
+        if not self.app.onboard_allowed():
+            return answer(False, c.tr("adm_zo_busy"))
+        entry = {"mac": mac, "name": name, "serial": mac, "hardware_serial": hw_serial,
+                 "product": q.get("product", "")[:64], "time": time.time()}
+        client = zededa.Client(z["cluster"], token=z["token"])
+        try:
+            node = client.device_by_serial(mac)    # serial = soft serial = the MAC address
+            if node:
+                entry.update(result="exists", name=node.get("name", name))
+                text = c.tr("adm_zo_exists", name=entry["name"])
+            else:
+                project_id = z.get("project_id") or client.project(project).get("id", "")
+                client.create_modelless(name, name, project_id, mac, c.get(s, "ZEDEDA_ONBOARDING_KEY"))
+                entry["result"] = "created"
+                text = c.tr("adm_zo_created", name=name, project=project)
+        except zededa.ZededaError as e:
+            if e.status == 401:
+                self.app.zededa = None
+            entry.update(result="failed", message=str(e))
+            text = c.tr("adm_zo_failed", error=str(e))
+        entry.setdefault("message", text)
+        self.app.remember(entry)
+        c.log(f"web: onboarding {mac} ({self.client_ip()}): {entry['result']} {entry['name']} {entry.get('message', '')}")
+        answer(entry["result"] != "failed", text)
+
     def logs(self, source, lines):
         c = self.core
         lines = max(10, min(lines, 5000))
@@ -770,6 +942,30 @@ def ensure_certificate(core):
     return cert, key
 
 
+PLAIN_PREFIX = b"GET /ipxe/onboard?"
+
+
+class PlainHandler(Handler):
+    """The boot menu's onboarding request: plain HTTP, nothing else served."""
+    plain = True
+
+
+def peek_start(sock, n, wait=5.0):
+    """The first n bytes of a request without consuming them (fewer when the
+    client sends less within `wait` seconds)."""
+    deadline = time.time() + wait
+    data = b""
+    try:
+        while len(data) < n and time.time() < deadline:
+            data = sock.recv(n, socket.MSG_PEEK)
+            if not data or len(data) >= n or b"\n" in data:
+                break
+            time.sleep(0.05)
+    except OSError:
+        return b""
+    return data[:n]
+
+
 class TLSServer(http.server.ThreadingHTTPServer):
     """TLS handshake per connection, in that connection's thread: a slow or
     broken client cannot hold up the others."""
@@ -786,8 +982,11 @@ class TLSServer(http.server.ThreadingHTTPServer):
         except OSError:
             return
         if first and first != b"\x16":
-            # plain HTTP on the HTTPS port: an address typed without https://
-            # (Safari then even falls back to http). Send the browser to https.
+            # plain HTTP on the HTTPS port. The boot menu's onboarding request
+            # (iPXE has no TLS) is served; anything else is an address typed
+            # without https:// (Safari even falls back to http): send it to https.
+            if peek_start(request, len(PLAIN_PREFIX)) == PLAIN_PREFIX:
+                return PlainHandler(request, client_address, self)
             return redirect_to_https(request)
         try:
             request = self.context.wrap_socket(request, server_side=True)

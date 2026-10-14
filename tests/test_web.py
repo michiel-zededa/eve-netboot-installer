@@ -12,10 +12,12 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import re
 import os
 import shutil
 import socket
 import ssl
+import sys
 import tarfile
 import tempfile
 import threading
@@ -36,6 +38,7 @@ def load(name, path):
     return module
 
 
+sys.path.insert(0, os.path.join(ROOT, "vm", "rootfs", "usr", "local", "lib", "eve-netboot"))  # zededa.py
 core = load("eve_netboot_core", os.path.join(ROOT, "vm", "rootfs", "usr", "local", "sbin", "eve-netboot"))
 web = load("eve_netboot_web", os.path.join(ROOT, "vm", "rootfs", "usr", "local", "lib", "eve-netboot",
                                            "eve_netboot_web.py"))
@@ -59,7 +62,8 @@ def eve_iso(path):
         return f.read()
 
 
-class WebTest(unittest.TestCase):
+class WebBase(unittest.TestCase):
+    """A management server on a free port, with the system mocked away."""
 
     def setUp(self):
         self.www = tempfile.mkdtemp(dir=TMP)
@@ -147,6 +151,9 @@ class WebTest(unittest.TestCase):
                 return body
             pause(0.02)
         self.fail("job did not finish")
+
+
+class WebTest(WebBase):
 
     # ---- static files
     def test_serves_the_ui_but_nothing_outside_the_web_root(self):
@@ -390,6 +397,153 @@ class WebTest(unittest.TestCase):
             status, body, _ = self.request("POST", "/api/actions/update-app", {})
             job = self.wait_job(body["job"])
         self.assertEqual((job["state"], job["result"]["message"], job["messages"]), ("done", "Updated.", ["Downloading ..."]))
+
+
+class FakeZededa:
+    """Stands in for zededa.Client: one shared fake controller per test."""
+    nodes = {}
+    created = []
+    logins = []
+
+    def __init__(self, cluster, token=None, opener=None):
+        self.cluster, self.token = cluster, token
+
+    def login(self, user, password, enterprise):
+        FakeZededa.logins.append((self.cluster, user, enterprise))
+        if password != "zededa-pw":
+            raise web.zededa.ZededaError(401, "CREDENTIAL_MISMATCH")
+        return {"token": "SECRET-TOKEN", "expires": web.time.time() + 4 * 3600, "role": "SysManager"}
+
+    def check(self):
+        return {"user": "sso-user", "expires": None}
+
+    def logout(self):
+        pass
+
+    def project(self, name):
+        return {"id": "proj-1", "name": name, "appPolicy": None}
+
+    def device_by_serial(self, serial):
+        return FakeZededa.nodes.get(serial)
+
+    def create_modelless(self, name, title, project_id, serial, key):
+        assert self.token == "SECRET-TOKEN"
+        FakeZededa.created.append((name, project_id, serial, key))
+        FakeZededa.nodes[serial] = {"name": name}
+        return "node-1"
+
+
+class ZededaWebTest(WebBase):
+    """The ZEDEDA session in the web management and the boot menu's request."""
+    MAC = "52-54-00-12-34-56"
+
+    def setUp(self):
+        super().setUp()
+        FakeZededa.nodes, FakeZededa.created, FakeZededa.logins = {}, [], []
+        p = mock.patch.object(web.zededa, "Client", FakeZededa)
+        p.start()
+        self.addCleanup(p.stop)
+        core.save_settings({"SERVER_IP": "auto", "ZEDEDA_ONBOARDING": "yes", "ZEDEDA_ENTERPRISE": "ENT",
+                            "ZEDEDA_USER": "eni@example.net", "ZEDEDA_PROJECT": "netboot"})
+        core.write(core.CONFIGURED, "now\n")
+
+    def onboard(self, action="register", mac=MAC, serial="To Be Filled By O.E.M."):
+        """The boot menu's request, over plain HTTP like iPXE sends it."""
+        conn = http.client.HTTPConnection("127.0.0.1", self.plain_port, timeout=10)
+        conn.request("GET", f"/ipxe/onboard?action={action}&mac={mac}&serial={serial.replace(' ', '%20')}&product=X1")
+        r = conn.getresponse()
+        body = r.read().decode()
+        self.assertEqual(r.status, 200, body)
+        self.assertTrue(body.startswith("#!ipxe\n") and body.isascii(), body)
+        return dict(re.findall(r"^set (eve_ob_\w+) (.*)$", body, re.M))
+
+    def start_tls(self):
+        p = mock.patch.object(web, "TLS_DIR", tempfile.mkdtemp(dir=TMP))
+        p.start()
+        self.addCleanup(p.stop)
+        cert, key = web.ensure_certificate(core)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+        server = web.TLSServer(("127.0.0.1", 0), web.Handler, ctx)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.plain_port = server.server_address[1]
+
+    def test_needs_the_admin(self):
+        self.assertEqual(self.request("GET", "/api/zededa")[0], 401)
+        self.assertEqual(self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})[0], 401)
+
+    def test_session_in_memory_only(self):
+        self.login()
+        status, body, _ = self.request("POST", "/api/zededa/login", {"password": "wrong"})
+        self.assertEqual(status, 400)
+        self.assertIn("CREDENTIAL_MISMATCH", body["error"])
+        status, body, _ = self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual((body["session"]["user"], body["session"]["project_id"]), ("eni@example.net", "proj-1"))
+        self.assertEqual(FakeZededa.logins[-1], ("zedcontrol.zededa.net", "eni@example.net", "ENT"))
+        # the token is in the process, nowhere else: not in answers, settings, export or logs
+        self.assertEqual(Handler_app().zededa["token"], "SECRET-TOKEN")
+        for _status, text, _ in (self.request("GET", "/api/zededa"), self.request("GET", "/api/settings"),
+                                self.request("GET", "/api/export")):
+            self.assertNotIn("SECRET-TOKEN", json.dumps(text) if not isinstance(text, bytes) else text.decode())
+        self.assertNotIn("SECRET-TOKEN", core.read(core.SETTINGS))
+        self.assertNotIn("zededa-pw", core.read(core.SETTINGS))
+        for call in self.mocks["log"].call_args_list:
+            self.assertNotIn("SECRET-TOKEN", str(call))
+        self.assertEqual(self.request("POST", "/api/zededa/logout", {})[0], 200)
+        self.assertIsNone(Handler_app().zededa)
+
+    def test_pasted_token(self):
+        self.login()
+        status, body, _ = self.request("POST", "/api/zededa/login", {"token": "PASTED"})
+        self.assertEqual((status, body["session"]["via"], body["session"]["user"]), (200, "token", "sso-user"))
+
+    def test_boot_menu_registers_a_machine_once(self):
+        self.start_tls()
+        self.assertEqual(self.onboard()["eve_ob_ok"], "0")              # nobody logged in to ZEDEDA
+        self.login()
+        self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
+        ob = self.onboard("preview")
+        self.assertEqual((ob["eve_ob_ok"], ob["eve_ob_s"]),
+                         ("1", "will be registered as eve-52-54-00-12-34-56 in project netboot"))
+        self.assertEqual(FakeZededa.created, [])                        # a preview creates nothing
+        ob = self.onboard()
+        self.assertEqual(ob["eve_ob_ok"], "1")
+        self.assertEqual(FakeZededa.created, [("eve-52-54-00-12-34-56", "proj-1", self.MAC,
+                                               "5d0767ee-0547-4569-b530-387e526f8cb9")])
+        ob = self.onboard()                                             # installed again: no duplicate
+        self.assertEqual((ob["eve_ob_ok"], ob["eve_ob_s"]), ("1", "already registered as eve-52-54-00-12-34-56"))
+        self.assertEqual(len(FakeZededa.created), 1)
+        status, body, _ = self.request("GET", "/api/zededa")
+        self.assertEqual([(n["mac"], n["result"], n["product"]) for n in body["onboarded"]],
+                         [(self.MAC, "exists", "X1")])
+
+    def test_boot_menu_requests_are_checked(self):
+        self.start_tls()
+        self.login()
+        self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
+        for mac in ("52:54:00:12:34:56", "x", "52-54-00-12-34-56-78", "${mac}"):
+            with self.subTest(mac=mac):
+                self.assertEqual(self.onboard(mac=mac.replace("$", "%24"))["eve_ob_ok"], "0")
+        self.assertEqual(FakeZededa.created, [])
+        # nothing else is served over plain HTTP: still a redirect to https
+        conn = http.client.HTTPConnection("127.0.0.1", self.plain_port, timeout=10)
+        conn.request("GET", "/api/zededa", headers={"Host": f"192.0.2.50:{self.plain_port}"})
+        self.assertEqual(conn.getresponse().status, 301)
+        conn = http.client.HTTPConnection("127.0.0.1", self.plain_port, timeout=10)
+        conn.request("POST", "/ipxe/onboard?action=register", body=b"", headers={"Host": "x"})
+        self.assertEqual(conn.getresponse().status, 301)
+
+    def test_off(self):
+        self.start_tls()
+        core.save_settings({"SERVER_IP": "auto", "ZEDEDA_ONBOARDING": "no"})
+        self.assertEqual(self.onboard()["eve_ob_ok"], "0")
+
+
+def Handler_app():
+    return web.Handler.app
 
 
 class CertificateTest(unittest.TestCase):

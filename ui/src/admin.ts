@@ -98,7 +98,38 @@ export const api = {
   password: (current: string, next: string) => call<{ ok: true }>("POST", "api/password", { current, new: next }),
   deleteImage: (file: string) => call<{ ok: true }>("DELETE", `api/images?file=${encodeURIComponent(file)}`, {}),
   confirmNetwork: (token: string) => call<{ ok: true }>("POST", "api/network/confirm", { token }),
+  zededa: () => call<ZededaInfo>("GET", "api/zededa"),
+  zededaLogin: (login: { password?: string; token?: string }) =>
+    call<ZededaInfo & { warning: string }>("POST", "api/zededa/login", login),
+  zededaLogout: () => call<{ ok: true }>("POST", "api/zededa/logout", {}),
 };
+
+/** ZEDEDA onboarding: the session lives in the appliance's memory only. */
+export interface ZededaInfo {
+  enabled: boolean;
+  cluster: string;
+  enterprise: string;
+  user: string;
+  project: string;
+  session: null | {
+    user: string;
+    enterprise: string;
+    cluster: string;
+    via: "password" | "token";
+    since: number;
+    expires: number | null;
+    project_id: string;
+  };
+  onboarded: {
+    mac: string;
+    name: string;
+    hardware_serial: string;
+    product: string;
+    result: "created" | "exists" | "failed";
+    message: string;
+    time: number;
+  }[];
+}
 
 /** Wait for a background task; onMessage gets every new progress line. */
 export async function waitJob(id: string, onMessage?: (msgs: string[]) => void): Promise<Job> {
