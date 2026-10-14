@@ -3,7 +3,7 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/**"]
   pull_request:
   workflow_dispatch:
 

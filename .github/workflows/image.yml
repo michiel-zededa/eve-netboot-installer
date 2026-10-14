@@ -4,7 +4,9 @@
 # Users can then set ENI_IMAGE=ghcr.io/<owner>/<repo>:latest instead of building.
 # For v* tags it also attaches compose.yaml + env.example (ENI_IMAGE pinned to
 # the version) and the VM appliance images (qcow2 amd64/arm64, VMDK/OVA amd64)
-# to the release.
+# to the release. A tag with a hyphen (v1.7.0-rc.1, a test version from a
+# feature branch) becomes a pre-release: never "latest" for downloads, the
+# :latest image or the VMs' update check.
 name: image
 
 on:
@@ -73,7 +75,7 @@ jobs:
           grep -q "^ENI_IMAGE=ghcr.io/${GITHUB_REPOSITORY}:${TAG#v}$" dist/env.example
           (cd dist && cp env.example .env && docker compose config -q && rm .env)
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes $([[ "$TAG" == *-* ]] && echo --prerelease)
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber dist/compose.yaml dist/env.example
 
   # ---- VM appliance: built for every version tag, attached to its release.
@@ -153,6 +155,6 @@ jobs:
           cd dist
           cat eve-netboot-*.sha256 > SHA256SUMS
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes $([[ "$TAG" == *-* ]] && echo --prerelease)
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
             eve-netboot-*.qcow2 eve-netboot-*.ova eve-netboot-*.vmdk SHA256SUMS
