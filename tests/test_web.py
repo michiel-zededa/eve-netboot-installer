@@ -639,6 +639,17 @@ class ZededaWebTest(WebBase):
         self.assertEqual((ob["eve_ob_ok"], ob["eve_ob_s"]),
                          ("0", "registration failed: the name eve-52-54-00-12-34-56 is already in use in ZEDEDA"))
 
+    def test_node_deleted_in_zededa_is_created_again(self):
+        """Deleted by hand in ZEDEDA, then the machine is installed again: a new node,
+        even though the appliance's list still has the old one."""
+        self.zededa_login()
+        self.onboard()
+        FakeZededa.nodes.clear()                                       # deleted in the ZEDEDA UI
+        ob = self.onboard("preview")
+        self.assertEqual(ob["eve_ob_s"], "will be registered as eve-52-54-00-12-34-56 in project netboot")
+        self.assertEqual(self.onboard()["eve_ob_s"], "registered as eve-52-54-00-12-34-56 in project netboot")
+        self.assertEqual(len(FakeZededa.created), 2)
+
     def test_delete_and_export(self):
         deleted = []
         FakeZededa.delete_device = lambda client, node_id: deleted.append(node_id)

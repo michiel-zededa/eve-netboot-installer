@@ -804,6 +804,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         typed = zededa.clean_name(q.get("name", ""))      # a name typed in the boot menu (key n)
         project = c.get(s, "ZEDEDA_PROJECT")
         known = self.app.onboarded_node(mac)
+        if known and self.still_there(known, z) is False:
+            known = None                                  # deleted in ZEDEDA itself: a new node
         if action == "preview":
             if known:
                 return answer(True, c.tr("adm_zo_exists", name=known["name"]))
@@ -823,8 +825,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def register(self, mac, typed, hw_serial, product, z):
         """Create the node for this MAC address (once). -> (ok, text for the boot menu)."""
         c = self.core
-        known = self.app.onboarded_node(mac)              # registered by this VM before: no API call
-        if known:
+        known = self.app.onboarded_node(mac)              # registered by this VM before
+        if known and self.still_there(known, z) is not False:
             return True, c.tr("adm_zo_exists", name=known["name"])
         s = c.load_settings()
         template, project = c.get(s, "ZEDEDA_NODE_NAME"), c.get(s, "ZEDEDA_PROJECT")
@@ -882,6 +884,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.app.remember(entry)
         c.log(f"web: onboarding {mac} ({self.client_ip()}): {entry['result']} {entry['name']} {entry['message']}")
         return entry["result"] != "failed", text
+
+    def still_there(self, node, z):
+        """Whether a node from the list still exists in ZEDEDA: True, False (it was
+        deleted there, e.g. by hand), or None (the role may not read nodes, or no
+        answer: then the list is trusted)."""
+        try:
+            return bool(zededa.Client(z["cluster"], token=z["token"]).device_by_serial(node["mac"]))
+        except zededa.ZededaError:
+            return None
 
     def zededa_delete(self, mac):
         """Delete the node this appliance registered for a MAC address, in ZEDEDA."""
