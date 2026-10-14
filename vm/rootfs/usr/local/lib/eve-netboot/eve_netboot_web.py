@@ -61,6 +61,7 @@ SECRET_KEYS = ("ADMIN_PASSWORD", "SMB_PASSWORD", "ENI_GITHUB_TOKEN")
 NETWORK_KEYS = ("NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY", "NET_DNS", "WEB_ADMIN_PORT")
 UPLOAD_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.iso$")
 MAC_RE = re.compile(r"^[0-9a-f]{2}(-[0-9a-f]{2}){5}$")
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 ONBOARD_PER_MINUTE = 60     # registrations from the boot menu, all machines together (batch installs)
 ONBOARD_KEEP = 200          # nodes remembered for the overview
 
@@ -714,12 +715,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 client.token = info["token"]
                 session = {"token": info["token"], "expires": info["expires"], "user": user, "via": "password"}
             del password
-            proj = client.project(project) if project else {}
         except zededa.ZededaError as e:
             c.log(f"web: ZEDEDA login to {cluster} failed: {e}")
             raise HttpError(400 if e.status else 502, c.tr("adm_zo_login_failed", error=str(e))) from None
+        # the project: its ID as given, or looked up by name (a role that may
+        # only create edge nodes may not read projects: then give the ID)
         warning = ""
-        if proj and (proj.get("appPolicy") or proj.get("deployment")):
+        proj = {"id": project} if UUID_RE.match(project) else {}
+        if project and not proj:
+            try:
+                proj = client.project(project)
+            except zededa.ZededaError as e:
+                warning = c.tr("adm_zo_project_unknown", project=project, error=str(e))
+        if proj.get("appPolicy") or proj.get("deployment"):
             warning = c.tr("adm_zo_policy_warning", project=project)
         session.update({"enterprise": enterprise, "cluster": cluster, "since": time.time(),
                         "project_id": proj.get("id", "")})
@@ -769,15 +777,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                  "product": q.get("product", "")[:64], "time": time.time()}
         client = zededa.Client(z["cluster"], token=z["token"])
         try:
-            node = client.device_by_serial(mac)    # serial = soft serial = the MAC address
+            if not z.get("project_id"):
+                raise zededa.ZededaError(400, c.tr("adm_zo_project_unknown", project=project, error="-"))
+            try:
+                node = client.device_by_serial(mac)    # serial = soft serial = the MAC address
+            except zededa.ZededaError as e:
+                if e.status != 403:                    # a role that may create but not read nodes
+                    raise
+                node = None
             if node:
                 entry.update(result="exists", name=node.get("name", name))
                 text = c.tr("adm_zo_exists", name=entry["name"])
             else:
-                project_id = z.get("project_id") or client.project(project).get("id", "")
-                client.create_modelless(name, name, project_id, mac, c.get(s, "ZEDEDA_ONBOARDING_KEY"))
-                entry["result"] = "created"
-                text = c.tr("adm_zo_created", name=name, project=project)
+                try:
+                    client.create_modelless(name, name, z["project_id"], mac, c.get(s, "ZEDEDA_ONBOARDING_KEY"))
+                    entry["result"] = "created"
+                    text = c.tr("adm_zo_created", name=name, project=project)
+                except zededa.ZededaError as e:
+                    if e.status != 409:                # the serial (or name) is already known
+                        raise
+                    entry["result"] = "exists"
+                    text = c.tr("adm_zo_exists", name=name)
         except zededa.ZededaError as e:
             if e.status == 401:
                 self.app.zededa = None

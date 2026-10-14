@@ -60,7 +60,9 @@ From [Onboard an Edge Device without selecting a Model](https://help.zededa.com/
   hardware identity itself when it connects.
 - Default onboarding key `5d0767ee-0547-4569-b530-387e526f8cb9`; an
   enterprise can have its own.
-- Needs SysManager or SysAdmin.
+- The article names SysManager or SysAdmin; a custom role with only
+  **Edge Nodes: Create** (+ **Read**) should be enough for what we call (see
+  *Safety*).
 - **The project must not have an application policy** (nor the deployment, if
   the node gets a deployment tag); ZEDEDA rejects the node otherwise.
 - EVE-OS older than 17.0.0-lts cannot report its hardware: the node stays
@@ -157,8 +159,15 @@ sequenceDiagram
 
 ## Safety
 
-- The token can do whatever the user can: a **dedicated local ZEDEDA user**
-  with only SysManager, used for nothing else, e.g. `eve-netboot-onboarding`.
+- The token can do whatever the user can: a **dedicated local ZEDEDA user**,
+  used for nothing else, with a custom role that may only create edge nodes:
+  - login/logout: no right needed;
+  - `POST devices/model-less`: **Edge Nodes: Create** (required);
+  - `GET devices/serial/{serial}`: **Edge Nodes: Read** (optional: without it
+    the duplicate check is skipped and a 409 on create counts as "exists");
+  - `GET projects/name/{name}`: reading projects (optional: give the
+    project's ID in `ZEDEDA_PROJECT` and it is not looked up).
+  To be confirmed with such a role (probe script).
 - The onboard request comes over plain HTTP from the LAN. Limits: only create,
   never change or delete; one node per MAC address; a rate limit; only while
   logged in; only for the configured project. Optional allow-list of MAC

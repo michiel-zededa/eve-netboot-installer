@@ -424,12 +424,19 @@ for which you have to know which soft serial ended up on which machine. Here:
 
 **Set it up once:**
 
-1. In ZEDEDA, create a **local user** only for this, with the **SysManager**
-   role, and a **project without an application policy** (ZEDEDA refuses nodes
-   without a model in a project with one), for example `onboarding`.
+1. In ZEDEDA, create:
+   - a **role** that may only create edge nodes: a custom role with
+     **Edge Nodes: Create** and, preferably, **Edge Nodes: Read** (then a
+     machine that is installed again is skipped instead of refused). Nothing
+     else is needed;
+   - a **local user** only for this, with that role (local: single sign-on
+     users cannot log in with a password through the API);
+   - a **project without an application policy** (ZEDEDA refuses nodes
+     without a model in a project with one), for example `onboarding`.
 2. In the web management, *ZEDEDA onboarding*: switch it on and fill in the API
    address of your cluster (`zedcontrol.zededa.net` by default), the
-   enterprise, the user and the project. The onboarding key is filled in
+   enterprise, the user and the project. When the role may not read projects,
+   enter the project's ID instead of its name. The onboarding key is filled in
    with the default of the EVE-OS images from GitHub.
 
 **Each time you install machines:**
@@ -597,7 +604,7 @@ Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `
 - **Exports** contain no passwords or tokens and are available for 15 minutes only.
 - **ZEDEDA onboarding:**
   - The ZEDEDA password is used for the login only. The session token is kept in the web management's memory, never on disk, in exports, diagnostics or logs; it is gone after a restart and expires after a few hours.
-  - Use a local ZEDEDA user only for this, with the SysManager role: the session can do whatever that user can.
+  - Use a local ZEDEDA user only for this, with a role that may only create (and read) edge nodes: the session can do whatever that user can.
   - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of port 8443; every other plain-HTTP request there is sent to HTTPS. That path can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Log out of ZEDEDA when the batch is installed.
 
 ---

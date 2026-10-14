@@ -119,10 +119,15 @@ def main():
             if isinstance(body.get("token"), dict):
                 print(f"   token.expires: {body['token'].get('expires')}")
 
-        status, proj = api.call("GET", "/v1/projects/name/" + urllib.parse.quote(a.project, safe=""))
-        show("project", status, proj, ["id", "name", "type", "appPolicy", "deployment", "numdevices"])
-        if status != 200:
-            return 1
+        if len(a.project) == 36 and a.project.count("-") == 4:
+            proj = {"id": a.project}         # a project ID: not looked up (a role without project read)
+            print(f"\n== project: ID {a.project} given, not looked up")
+        else:
+            status, proj = api.call("GET", "/v1/projects/name/" + urllib.parse.quote(a.project, safe=""))
+            show("project", status, proj, ["id", "name", "type", "appPolicy", "deployment", "numdevices"])
+            if status != 200:
+                print("(the role may not read projects: run again with the project's ID as --project)")
+                return 1
 
         tag = secrets.token_hex(4)
         serial = f"eni-probe-{tag}"
@@ -136,6 +141,9 @@ def main():
         if status != 200:
             print("\n(not created; nothing to delete)")
             return 0
+        create_id = body.get("objectId", "")
+        status, body = api.call("POST", "/v1/devices/model-less", create)
+        show("create the same node again (duplicate)", status, body, ["httpStatusCode", "error"])
 
         status, dev = api.call("GET", "/v1/devices/serial/" + urllib.parse.quote(serial, safe=""))
         show("lookup by serial", status, dev,
@@ -144,8 +152,13 @@ def main():
         if not dev_id:
             status, dev = api.call("GET", "/v1/devices/name/" + name)
             dev_id = dev.get("id") if isinstance(dev, dict) else None
+        if not dev_id:
+            dev_id = create_id
         status, body = api.call("DELETE", f"/v1/devices/id/{dev_id}")
         show("delete", status, body, ["objectName", "operationStatus", "error"])
+        if status != 200:
+            print(f"\n!! The test node {name} could not be deleted (the role may not delete nodes):")
+            print("!! delete it yourself in ZEDEDA (Edge Nodes).")
         status, _ = api.call("GET", "/v1/devices/serial/" + urllib.parse.quote(serial, safe=""))
         print(f"== lookup after delete: HTTP {status} (404 = gone)")
     finally:

@@ -536,6 +536,50 @@ class ZededaWebTest(WebBase):
         conn.request("POST", "/ipxe/onboard?action=register", body=b"", headers={"Host": "x"})
         self.assertEqual(conn.getresponse().status, 301)
 
+    def test_a_role_that_may_only_create_nodes(self):
+        """Edge Nodes: Create only. No reading nodes (no duplicate check: a refused
+        duplicate counts as registered) and no reading projects (give the ID)."""
+        project_id = "46cc7a5d-1d04-444a-a65e-220875d92a87"
+
+        class CreateOnly(FakeZededa):
+            def project(self, name):
+                raise AssertionError("an ID is not looked up")
+
+            def device_by_serial(self, serial):
+                raise web.zededa.ZededaError(403, "permission denied")
+
+            def create_modelless(self, name, title, pid, serial, key):
+                if serial in FakeZededa.nodes:
+                    raise web.zededa.ZededaError(409, "already exists")
+                return super().create_modelless(name, title, pid, serial, key)
+
+        core.save_settings({**core.load_settings(), "ZEDEDA_PROJECT": project_id})
+        with mock.patch.object(web.zededa, "Client", CreateOnly):
+            self.start_tls()
+            self.login()
+            status, body, _ = self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
+            self.assertEqual((status, body["warning"], body["session"]["project_id"]), (200, "", project_id))
+            self.assertEqual(self.onboard()["eve_ob_ok"], "1")
+            self.assertEqual(FakeZededa.created[0][1:3], (project_id, self.MAC))
+            ob = self.onboard()                                         # installed again
+            self.assertEqual((ob["eve_ob_ok"], ob["eve_ob_s"]), ("1", "already registered as eve-52-54-00-12-34-56"))
+
+    def test_project_that_cannot_be_read(self):
+        class NoProjects(FakeZededa):
+            def project(self, name):
+                raise web.zededa.ZededaError(403, "permission denied")
+
+        with mock.patch.object(web.zededa, "Client", NoProjects):
+            self.start_tls()
+            self.login()
+            status, body, _ = self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
+            self.assertEqual(status, 200)                               # logged in, with a warning
+            self.assertIn("enter the project's ID", body["warning"])
+            ob = self.onboard()
+            self.assertEqual(ob["eve_ob_ok"], "0")
+            self.assertIn("enter the project's ID", ob["eve_ob_s"])
+            self.assertEqual(FakeZededa.created, [])
+
     def test_off(self):
         self.start_tls()
         core.save_settings({"SERVER_IP": "auto", "ZEDEDA_ONBOARDING": "no"})
