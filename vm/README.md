@@ -595,6 +595,10 @@ Logs: menu → *Command line*, then `sudo journalctl -u eve-netboot-setup` and `
   - It can be switched off completely (`WEB_ADMIN=no`); it is off after a setup on the VM's screen.
 - **Passwords in cloud-init:** `ADMIN_PASSWORD` is not stored in the VM's settings, but the hypervisor keeps the user-data. `ADMIN_PASSWORD_HASH` avoids a readable password there.
 - **Exports** contain no passwords or tokens and are available for 15 minutes only.
+- **ZEDEDA onboarding:**
+  - The ZEDEDA password is used for the login only. The session token is kept in the web management's memory, never on disk, in exports, diagnostics or logs; it is gone after a restart and expires after a few hours.
+  - Use a local ZEDEDA user only for this, with the SysManager role: the session can do whatever that user can.
+  - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of port 8443; every other plain-HTTP request there is sent to HTTPS. That path can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Log out of ZEDEDA when the batch is installed.
 
 ---
 
