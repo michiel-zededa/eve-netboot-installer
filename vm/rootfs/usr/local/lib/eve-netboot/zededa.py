@@ -3,8 +3,8 @@ zededa -- the few ZEDEDA API calls the appliance uses to onboard nodes
 =====================================================================
 
 Standard library only. The session token is held by the caller, in memory;
-this module never writes anything to disk. Tested against the API (see
-docs/design/zededa-onboarding.md):
+this module never writes anything to disk. The calls and how the API answers
+them: docs/design/zededa-onboarding.md.
 
 - POST /api/v1/login                 -> token {base64, expires (ns since 1970)}
 - POST /api/v1/logout

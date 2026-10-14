@@ -17,6 +17,11 @@
    - `kernel` with the EVE installer command line + your options
    - `ucode.img` (x86 microcode, when present) and `initrd.img`
    - `installer.iso`, added to the initrd as the cpio entry `/installer.iso`
+
+   With ZEDEDA onboarding on (VM appliance), the summary of an EVE-OS 17+
+   image also asks the VM what will happen, and **i** first has the VM create
+   the edge node in ZEDEDA (soft serial = the MAC address); see
+   [design/zededa-onboarding.md](design/zededa-onboarding.md).
 5. **EVE installer** – the initrd loop-mounts `/installer.iso`, starts
    `rootfs_installer.img` and installs EVE-OS to the target disk.
 

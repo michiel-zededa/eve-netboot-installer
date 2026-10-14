@@ -393,11 +393,6 @@ VM offers.
 
 ### Onboard installed machines in ZEDEDA
 
-> [!NOTE]
-> Test version (branch `feature/zededa-onboarding`, pre-releases
-> `1.7.0-rc.*`). The design and test results are in
-> [docs/design/zededa-onboarding.md](../docs/design/zededa-onboarding.md).
-
 > [!IMPORTANT]
 > **Only for EVE-OS 17.0.0-lts and later.** The nodes are created without a
 > hardware model, and only EVE-OS 17 and later report their own hardware to
@@ -438,6 +433,10 @@ for which you have to know which soft serial ended up on which machine. Here:
    enterprise, the user and the project. When the role may not read projects,
    enter the project's ID instead of its name. The onboarding key is filled in
    with the default of the EVE-OS images from GitHub.
+3. Optionally, check the user and its role from any computer with Python:
+   [docs/design/zededa_api_probe.py](../docs/design/zededa_api_probe.py)
+   creates and deletes one test node
+   ([how](../docs/design/zededa-onboarding.md#checking-a-zededa-user)).
 
 **Each time you install machines:**
 
@@ -464,6 +463,9 @@ the machine is installed but not onboarded, and the summary says why.
 for a batch of identical machines. ZEDEDA requires such a machine to match the
 model exactly, including its network and IO adapters, so it only suits batches
 of the same hardware.
+
+How it works, the ZEDEDA API calls it makes and the rights each one needs:
+[docs/design/zededa-onboarding.md](../docs/design/zededa-onboarding.md).
 
 ---
 

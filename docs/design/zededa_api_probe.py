@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Answer the open API questions of zededa-onboarding.md with real calls.
+"""Check that a ZEDEDA user and its role can do what onboarding needs.
 
-Logs in (the password is asked here and never printed or stored), looks up the
-project, creates ONE test edge node without a model, reads it back by serial,
-deletes it again and logs out. Only results are printed, never the token.
+Logs in (the password is asked here and never printed or stored), looks up
+the project (or takes its ID), creates ONE test node without a model, creates
+it a second time (the answer to a duplicate), reads it back by serial,
+deletes it and logs out. Only results are printed, never the token. A role
+that may not delete nodes leaves the test node (eni-probe-...): delete it in
+ZEDEDA yourself.
 
     python3 zededa_api_probe.py --cluster zedcontrol.zededa.net \
-        --enterprise <enterprise> --user <user> --project <project>
+        --enterprise <enterprise> --user <user> --project <project name or ID>
 """
 import argparse
 import datetime

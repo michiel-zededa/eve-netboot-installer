@@ -23,7 +23,7 @@ What it does:
 - **Keeps a mirror up to date:** a local mirror of the latest EVE-OS LTS releases.
 - **Includes your own builds:** it adds your own installer ISOs, such as controller-specific builds.
 - **Serves one boot menu:** everything is offered in a single iPXE menu. No USB sticks, no BMC virtual media, no per-release fiddling.
-- **Onboards them in ZEDEDA** *(VM appliance, test version)*: install many machines at once and have them registered in ZEDEDA in the same go, without looking up a single serial number. For EVE-OS 17.0.0-lts and later.
+- **Onboards them in ZEDEDA** *(VM appliance)*: install many machines at once and have them registered in ZEDEDA in the same go, without looking up a single serial number. For EVE-OS 17.0.0-lts and later.
 
 ```text
  LF Edge EVE-OS
@@ -43,7 +43,7 @@ What it does:
 
 ## Screenshots
 
-All taken on a test VM in a documentation network (`192.0.2.0/24`).
+All taken in a documentation network (`192.0.2.0/24`).
 
 | | |
 |---|---|
@@ -88,7 +88,7 @@ All taken on a test VM in a documentation network (`192.0.2.0/24`).
 | **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
 | **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); an optional DHCP service of its own (proxyDHCP next to your DHCP server, or a full DHCP server for an isolated network); automatic security updates and app updates with rollback. |
-| **ZEDEDA onboarding** (test version) | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. You log in to ZEDEDA in the web management; the session is kept in memory only. See [ZEDEDA onboarding](#zededa-onboarding). |
+| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. You log in to ZEDEDA in the web management; the session is kept in memory only. See [ZEDEDA onboarding](#zededa-onboarding). |
 
 ## How it works
 
@@ -125,7 +125,7 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the details.
 
 ### ZEDEDA onboarding
 
-*VM appliance, test version, EVE-OS 17.0.0-lts and later.* Normally every node
+*VM appliance, EVE-OS 17.0.0-lts and later.* Normally every node
 has to be added in ZEDEDA with its serial number: the hardware serial from a
 label or the BIOS, or a soft serial, for which you have to know which soft
 serial ended up on which machine. With onboarding switched on, the boot server
@@ -164,7 +164,7 @@ The summary of an EVE-OS 17+ image shows the node name and the option
 **Onboard in ZEDEDA [o]** (on by default) next to **Install now [i]**; older
 images are installed as before, without onboarding. Setup and use:
 [vm/README.md: Onboard installed machines in ZEDEDA](vm/README.md#onboard-installed-machines-in-zededa);
-design and API test results:
+design and the ZEDEDA API it uses:
 [docs/design/zededa-onboarding.md](docs/design/zededa-onboarding.md).
 
 ## Requirements
@@ -203,7 +203,7 @@ design and API test results:
 3. **Set it up** on the VM's screen, in a browser at `https://<VM address>:8443/`, or through cloud-init: language, network, admin password.
 4. **DHCP:** turn on *DHCP service → Proxy* in the VM, or set next-server and the boot file on your DHCP server (see [DHCP](#dhcp)).
 5. **Boot a machine:** network boot it, pick a release, review the options and press **`i`**.
-6. **Optional, onboard in ZEDEDA** *(test version)*: switch on *ZEDEDA onboarding* in the web management, log in to ZEDEDA there, and the machines you install with EVE-OS 17+ are registered as edge nodes (see [ZEDEDA onboarding](#zededa-onboarding)).
+6. **Optional, onboard in ZEDEDA:** switch on *ZEDEDA onboarding* in the web management, log in to ZEDEDA there, and the machines you install with EVE-OS 17+ are registered as edge nodes (see [ZEDEDA onboarding](#zededa-onboarding)).
 
 **[vm/README.md](vm/README.md)** is the full guide: setup, the console and web management, your own ISOs, updates and replacing the VM.
 
@@ -389,7 +389,7 @@ How the translations work:
 │   └── i18n/              # translations
 ├── docker/                # iPXE build script, embedded iPXE script, entrypoint
 ├── docs/                  # deployment guide, how it works, DHCP configuration
-│   └── design/            # design notes (ZEDEDA onboarding, API test script)
+│   └── design/            # design notes (ZEDEDA onboarding, a check of a ZEDEDA user)
 ├── tests/                 # unit tests + EVE GRUB fixtures
 ├── ui/                    # web UI (React + Vite + TypeScript)
 └── vm/                    # the VM appliance: setup menu, web management, ZEDEDA client, image build, docs

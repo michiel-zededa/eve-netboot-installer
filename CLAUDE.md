@@ -106,6 +106,16 @@ and the UI type check + build.
   server (needs NET_MODE static). Empty DHCP_* settings follow the VM's own
   network (`dhcp_plan`). It must never answer DNS (port=0). The iPXE embed
   script takes the boot server from `${proxydhcp/next-server}` when set.
+- ZEDEDA onboarding (VM appliance, `ZEDEDA_*` settings, `zededa.py`; design in
+  docs/design/zededa-onboarding.md): nodes are created without a model
+  (`POST /api/v1/devices/model-less`), so only for images of EVE-OS
+  17.0.0-lts and later; the menu option exists only in the summary of those
+  images. Serial = soft serial = the MAC address. The ZEDEDA password is used
+  for the login request only and the session token lives in the web
+  process's memory only: never in settings, exports, diagnostics, logs or API
+  answers (tested). `/ipxe/onboard` is the only path served without TLS
+  (`PlainHandler`); it may only create nodes. The role it needs: Edge Nodes
+  Create (+ Read); keep it working without Read and without reading projects.
 - Appliance: the console shows only status without login; the menu needs the
   admin password. Without cloud-init settings nothing starts until the setup
   is done. Passwords (ADMIN_PASSWORD, SMB_PASSWORD) are applied and never
