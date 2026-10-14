@@ -74,7 +74,10 @@ From the Swagger definitions at `https://zedcontrol.<cluster>/api/v1/docs/`
   `enterpriseName` works for a local user; the session lasts **4 hours**
   (`token.expires`, nanoseconds since 1970). `PUT /api/v1/sessions/refresh`
   answers 200 (`token.expires` 0 in the answer: to check whether it extends).
-  Wrong passwords count down `noOfLoginAttemptsLeft`; at 0 the user is locked.
+  A wrong password answers 401 `CREDENTIAL_MISMATCH` with
+  `noOfLoginAttemptsLeft: 0`, yet the next login with the right password
+  worked without unlocking anything: do not read that field as "locked";
+  show the controller's answer as it is.
 - `POST /api/v1/devices` **without `modelId` fails**: 400 `Invalid Model`.
 - **`POST /api/v1/devices/model-less`** (not in the published definitions; the
   ZEDEDA UI uses it when no model is chosen) with the same `DeviceConfig`
