@@ -167,7 +167,7 @@ class MenuTest(unittest.TestCase):
         confirm = m[m.index(":eve_confirm_ob"):m.index(":eve_boot\n")]
         self.assertIn("item --key i eve_boot ${eve_sp}Install now [i]", confirm)
         self.assertIn("item --key o eve_ob_toggle ${eve_sp}Onboard in ZEDEDA: ${eve_onboard_s}  [o]", confirm)
-        self.assertIn("isset ${eve_ob_s} && item --gap ZEDEDA: ${eve_ob_s} ||", confirm)
+        self.assertIn("isset ${eve_ob_s} && item --gap ZEDEDA node: ${eve_ob_s} ||", confirm)
         self.assertIn("choose --default eve_menu", confirm)          # Enter alone installs nothing
         # a name for this one machine (key n), sent with both requests
         self.assertIn("iseq ${eve_ob_do} 1 && item --key n eve_ob_rename ${eve_sp}Node name: ${eve_ob_name_s}  [n] ||",

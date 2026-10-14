@@ -39,6 +39,8 @@ export default function Settings({ section, onSaved }: { section: SectionId; onS
     <div className="page">
       <PageHeader title={t(`adm_sec_${def.id}`)} subtitle={text} />
       {error && <div className="alert err">{error}</div>}
+      {/* ZEDEDA onboarding: the login and the onboarded machines first (every batch), the settings below (once) */}
+      {def.id === "zededa" && <ZededaSession key={state.phase} />}
       <Card>
         {def.warning && (
           <div className="alert warn"><TriangleAlert size={16} /> {t(def.warning)}</div>
@@ -54,7 +56,6 @@ export default function Settings({ section, onSaved }: { section: SectionId; onS
           <SaveStatus state={state} />
         </div>
       </Card>
-      {def.id === "zededa" && <ZededaSession key={state.phase} />}
       {state.phase === "rollback" && (
         <RollbackDialog result={state.result} onClose={() => { reset(); setChanges({}); load(); }} />
       )}

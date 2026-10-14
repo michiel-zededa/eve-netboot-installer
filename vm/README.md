@@ -458,6 +458,8 @@ for which you have to know which soft serial ended up on which machine. Here:
    creates and deletes one test node
    ([how](../docs/design/zededa-onboarding.md#checking-a-zededa-user)).
 
+![ZEDEDA onboarding in the web management](../docs/images/web-zededa.png)
+
 **Each time you install machines:**
 
 1. *ZEDEDA onboarding* → log in to ZEDEDA, in the web management or in the
@@ -468,7 +470,7 @@ for which you have to know which soft serial ended up on which machine. Here:
    the VM or the web management restarts. A password session lasts 4 hours;
    an API token as long as ZEDEDA lets it.
 2. Network boot the machines and choose an EVE-OS 17 (or later) image. Its
-   summary shows *ZEDEDA: will be registered as …* and the choices
+   summary shows *ZEDEDA node: … in …* (the name and the project) and the choices
    **Install now [i]**, **Onboard in ZEDEDA: on [o]** and **Node name [n]**.
    Press **i**: the VM creates the node, then the installation starts.
 3. The list of onboarded machines (web management and console) fills while
@@ -477,6 +479,8 @@ for which you have to know which soft serial ended up on which machine. Here:
    onboarding project; assign their adapters to network instances and move
    them to their own project.
 4. Log out of ZEDEDA when the batch is installed.
+
+![The summary of an EVE-OS 17 image with onboarding](../docs/images/ipxe-onboard.png)
 
 In the summary of an EVE-OS 17+ image:
 

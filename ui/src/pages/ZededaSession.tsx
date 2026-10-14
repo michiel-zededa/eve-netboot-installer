@@ -9,6 +9,14 @@ import { Confirm, errorText, useToast } from "../forms";
 import { useT } from "../i18n";
 
 const time = (s: number | null) => (s ? new Date(s * 1000).toLocaleString() : "?");
+// today: only the time; otherwise date and time
+const when = (s?: number) => {
+  if (!s) return "-";
+  const d = new Date(s * 1000);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+};
 
 const STATE_TONE: Record<string, string> = {
   online: "ok", starting: "info", waiting: "warn", offline: "warn", error: "err", gone: "err",
@@ -89,17 +97,17 @@ export default function ZededaSession() {
         {warning && <div className="alert warn"><TriangleAlert size={16} /> {warning}</div>}
         {s ? (
           <>
-            <p>
-              <span className="pill ok">{t("adm_zo_logged_in")}</span>{" "}
-              {s.via === "token"
-                ? t("adm_zo_session_token_text", { cluster: s.cluster })
-                : t("adm_zo_session_text", { user: s.user, enterprise: s.enterprise, cluster: s.cluster,
-                                             until: time(s.expires) })}
-            </p>
-            <p className="muted small">{t("adm_zo_memory_note")}</p>
-            <div className="form-actions">
-              <button className="btn" disabled={busy} onClick={logout}><LogOut size={16} /> {t("adm_zo_logout")}</button>
+            <div className="session-row">
+              <p>
+                <span className="pill ok">{t("adm_zo_logged_in")}</span>{" "}
+                {s.via === "token"
+                  ? t("adm_zo_session_token_text", { cluster: s.cluster })
+                  : t("adm_zo_session_text", { user: s.user, enterprise: s.enterprise, cluster: s.cluster,
+                                               until: time(s.expires) })}
+              </p>
+              <button className="btn slim" disabled={busy} onClick={logout}><LogOut size={16} /> {t("adm_zo_logout")}</button>
             </div>
+            <p className="muted small">{t("adm_zo_memory_note")}</p>
           </>
         ) : (
           <>
@@ -137,12 +145,12 @@ export default function ZededaSession() {
         )}
       </Card>
       <Card title={t("adm_zo_onboarded")} actions={info.onboarded.length > 0 && (
-        <>
+        <div className="card-actions">
           {s && (
             <button className="btn slim" onClick={() => load(true)}><RefreshCw size={16} /> {t("adm_zo_check_now")}</button>
           )}
           <a className="btn slim" href="api/zededa/export" download><Download size={16} /> {t("adm_zo_export_csv")}</a>
-        </>
+        </div>
       )}>
         {nodes.length > 0 && (
           <p>
@@ -163,7 +171,6 @@ export default function ZededaSession() {
                   <th>{t("adm_zo_col_name")}</th>
                   <th>{t("adm_zo_col_mac")}</th>
                   <th>{t("adm_zo_col_machine")}</th>
-                  <th>{t("adm_zo_col_result")}</th>
                   <th>{t("adm_zo_col_state")}</th>
                   <th></th>
                 </tr>
@@ -171,27 +178,32 @@ export default function ZededaSession() {
               <tbody>
                 {info.onboarded.map((n) => (
                   <tr key={n.mac}>
-                    <td>{time(n.time)}</td>
-                    <td>{n.name}</td>
-                    <td className="mono">{n.mac}</td>
-                    <td>{[n.product, n.hardware_serial].filter(Boolean).join(", ") || "-"}</td>
+                    <td className="nowrap">{when(n.time)}</td>
+                    <td className="nowrap"><strong>{n.name}</strong></td>
+                    <td className="mono nowrap">{n.mac}</td>
                     <td>
-                      <span className={`pill ${n.result === "failed" ? "err" : n.result === "deleted" ? "neutral" : "ok"}`}>
-                        {t(`adm_zo_result_${n.result}`)}
-                      </span>
-                      {n.result === "failed" && <div className="small err-text">{n.message}</div>}
+                      {n.product || "-"}
+                      {n.hardware_serial && <div className="small muted mono">{n.hardware_serial}</div>}
                     </td>
                     <td>
+                      {n.result === "failed" || n.result === "deleted" || !n.status ? (
+                        <span className={`pill ${n.result === "failed" ? "err" : n.result === "deleted" ? "neutral" : "ok"}`}>
+                          {t(`adm_zo_result_${n.result}`)}
+                        </span>
+                      ) : (
+                        <span className={`pill ${STATE_TONE[n.status.state]}`} title={n.status.run_state ?? ""}>
+                          {t(`adm_zo_state_${n.status.state}`)}
+                        </span>
+                      )}
+                      {n.result === "failed" && <div className="small err-text">{n.message}</div>}
                       {n.result !== "failed" && n.result !== "deleted" && (
                         <>
-                          <span className={`pill ${STATE_TONE[n.status?.state ?? "unknown"]}`}
-                            title={n.status?.run_state ?? ""}>
-                            {t(`adm_zo_state_${n.status?.state ?? "unknown"}`)}
-                          </span>
-                          <div className="small muted">
-                            {n.online_since ? `${t("adm_zo_online_since")} ${time(n.online_since)}` : ""}
-                            {n.status?.eve ? ` · ${t("adm_zo_eve_version")} ${n.status.eve}` : ""}
-                          </div>
+                          {(n.online_since || n.status?.eve) && (
+                            <div className="small muted">
+                              {[n.online_since ? `${t("adm_zo_online_since")} ${when(n.online_since)}` : "",
+                                n.status?.eve ? `${t("adm_zo_eve_version")} ${n.status.eve}` : ""].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
                           {n.status?.error && <div className="small err-text">{n.status.error}</div>}
                         </>
                       )}

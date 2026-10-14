@@ -534,7 +534,7 @@ class ZededaWebTest(WebBase):
         self.request("POST", "/api/zededa/login", {"password": "zededa-pw"})
         ob = self.onboard("preview")
         self.assertEqual((ob["eve_ob_ok"], ob["eve_ob_s"]),
-                         ("1", "will be registered as eve-52-54-00-12-34-56 in project netboot"))
+                         ("1", "eve-52-54-00-12-34-56 in netboot"))
         self.assertEqual(FakeZededa.created, [])                        # a preview creates nothing
         ob = self.onboard()
         self.assertEqual(ob["eve_ob_ok"], "1")
@@ -616,8 +616,7 @@ class ZededaWebTest(WebBase):
         core.save_settings({**core.load_settings(), "ZEDEDA_NODE_NAME": "bench1-node-{n:3}", "ZEDEDA_NODE_NEXT": "7"})
         self.zededa_login()
         ob = self.onboard("preview")
-        self.assertEqual(ob["eve_ob_s"], "will be registered as bench1-node-007 in project netboot "
-                                         "(the number is fixed when installing)")
+        self.assertEqual(ob["eve_ob_s"], "bench1-node-007 in netboot (number set at install)")
         macs = [f"52-54-00-00-00-{i:02x}" for i in range(3)]
         for mac in macs:
             self.assertEqual(self.onboard(mac=mac)["eve_ob_ok"], "1")
@@ -630,7 +629,7 @@ class ZededaWebTest(WebBase):
         core.save_settings({**core.load_settings(), "ZEDEDA_NODE_NAME": "bench-{n}", "ZEDEDA_NODE_NEXT": "1"})
         self.zededa_login()
         ob = self.onboard("preview", name="Rack 3 / Slot 12")
-        self.assertEqual(ob["eve_ob_s"], "will be registered as rack-3-slot-12 in project netboot")
+        self.assertEqual(ob["eve_ob_s"], "rack-3-slot-12 in netboot")
         self.onboard(name="Rack 3 / Slot 12")
         self.assertEqual(FakeZededa.created[0][0], "rack-3-slot-12")
         self.assertEqual(core.get(core.load_settings(), "ZEDEDA_NODE_NEXT"), "1")   # the counter is untouched
@@ -653,7 +652,7 @@ class ZededaWebTest(WebBase):
         self.onboard()
         FakeZededa.nodes.clear()                                       # deleted in the ZEDEDA UI
         ob = self.onboard("preview")
-        self.assertEqual(ob["eve_ob_s"], "will be registered as eve-52-54-00-12-34-56 in project netboot")
+        self.assertEqual(ob["eve_ob_s"], "eve-52-54-00-12-34-56 in netboot")
         self.assertEqual(self.onboard()["eve_ob_s"], "registered as eve-52-54-00-12-34-56 in project netboot")
         self.assertEqual(len(FakeZededa.created), 2)
 

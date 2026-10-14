@@ -99,7 +99,7 @@ sequenceDiagram
     W->>Z: POST /api/v1/login (password) or check the token
     Z-->>W: token (kept in memory only)
     M->>W: summary of an EVE-OS 17+ image: GET /ipxe/onboard?action=preview
-    W-->>M: "will be registered as eve-<mac> in project <project>"
+    W-->>M: "ZEDEDA node: eve-<mac> in <project>"
     M->>W: n: a name for this machine (optional)
     M->>W: i pressed: GET /ipxe/onboard?action=register
     W->>Z: GET devices/serial/{mac}, else POST devices/model-less
@@ -140,7 +140,7 @@ sequenceDiagram
    application policy or deployment gives a warning.
 4. **Boot menu, only for images of EVE-OS 17.0.0-lts and later.** Their
    summary is a small iPXE menu: the summary lines, the line *ZEDEDA: will be
-   registered as <name> in project <project>* (or why not), **Install now [i]**,
+   ZEDEDA node: <name> in <project>* (or why not), **Install now [i]**,
    **Onboard in ZEDEDA: on/off [o]** (on by default; only with the soft
    serial on) and **Node name [n]**. It is not among the general installation options, which are
    chosen before the image. The summary of older images is unchanged and says

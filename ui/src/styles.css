@@ -510,6 +510,12 @@ pre.small-log { max-height: 240px; margin-top: 16px; background: var(--surface-2
 .table.compact th, .table.compact td { padding: 8px 10px; font-size: 13px; white-space: normal; }
 .table.compact th { padding: 8px 10px; }
 .table.compact tbody tr { cursor: default; }
+.table.compact td.nowrap { white-space: nowrap; }
+.table.compact th { white-space: nowrap; }
+.card-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.session-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.session-row p { margin: 0; }
+.page > .card + .card { margin-top: 20px; }
 .notice.upload { flex-direction: column; align-items: stretch; gap: 6px; }
 .notice.upload .progress { margin: 0; }
 .card > .alert { margin: 20px 24px 0; }

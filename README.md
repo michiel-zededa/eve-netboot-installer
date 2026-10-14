@@ -53,6 +53,8 @@ All taken in a documentation network (`192.0.2.0/24`).
 | **Boot menu** on the machine, in the look of EVE-OS's own console. | **Confirmation** before installing, with the options and a warning. |
 | ![VM appliance console](docs/images/console-status.png) | ![Web management](docs/images/web-settings.png) |
 | **VM appliance console:** status with tabs, coloured states, the keys and a clock. | **Web management** of the VM: the same settings as its console menu. |
+| ![ZEDEDA onboarding in the web management](docs/images/web-zededa.png) | ![Summary of an EVE-OS 17 image with ZEDEDA onboarding](docs/images/ipxe-onboard.png) |
+| **ZEDEDA onboarding:** the machines of a staging bench, their nodes and whether they came online. | **Onboarding in the boot menu:** the node's name from the naming convention, before **`i`**. |
 
 ---
 
@@ -141,7 +143,7 @@ sequenceDiagram
     A->>V: log in to ZEDEDA (web management)
     V->>Z: API token or login, kept in memory only
     C->>V: choose an EVE-OS 17+ image: summary
-    Note over C: ZEDEDA: will be registered as eve-(MAC address)
+    Note over C: ZEDEDA node: eve-(MAC address) in (project)
     C->>V: i: register this MAC address
     V->>Z: create the edge node: no model, serial = MAC, onboarding project
     C->>V: kernel, initrd, installer.iso
