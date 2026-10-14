@@ -68,6 +68,25 @@ From the Swagger definitions at `https://zedcontrol.<cluster>/api/v1/docs/`
   duplicates); `GET /api/v1/devices/name/{name}/status` for its state.
 - Adapter fields in the definitions are marked "(model-less devices)".
 
+### Tested (2026-10-14, cluster `zedcontrol.thor.zededa.dev`, `docs/design/zededa_api_probe.py`)
+
+- `POST /api/v1/login` with `usernameAtRealm`/`username`, `password`,
+  `enterpriseName` works for a local user; the session lasts **4 hours**
+  (`token.expires`, nanoseconds since 1970). `PUT /api/v1/sessions/refresh`
+  answers 200 (`token.expires` 0 in the answer: to check whether it extends).
+  Wrong passwords count down `noOfLoginAttemptsLeft`; at 0 the user is locked.
+- `POST /api/v1/devices` **without `modelId` fails**: 400 `Invalid Model`.
+- **`POST /api/v1/devices/model-less`** (not in the published definitions; the
+  ZEDEDA UI uses it when no model is chosen) with the same `DeviceConfig`
+  minus `modelId` **works**: 200, node created.
+- The onboarding key is the field **`obkey`**; ZEDEDA stores it as
+  `<key>:<serial>`. `serialno` is stored as given; `modelId` empty,
+  `utype` `UNSPECIFIED`.
+- `adminState: ADMIN_STATE_INACTIVE` was sent; the node came back as
+  `ADMIN_STATE_CREATED`.
+- `GET /api/v1/devices/serial/{serialno}` finds it (duplicate check);
+  `DELETE /api/v1/devices/id/{id}` removes it (then 404).
+
 ## Proposed architecture
 
 ```mermaid
@@ -83,7 +102,7 @@ sequenceDiagram
     A->>W: project, onboarding key, name template
     M->>H: menu: install 17.x with "Onboard in ZEDEDA"
     H->>W: register MAC (+ SMBIOS data), internal only
-    W->>Z: GET devices/serial/{soft serial}, else POST devices
+    W->>Z: GET devices/serial/{soft serial}, else POST devices/model-less
     Z-->>W: node created
     W-->>M: node name (shown before the installation starts)
     Note over M,Z: install, first boot, EVE-OS registers and reports its hardware
@@ -124,9 +143,9 @@ sequenceDiagram
 
 ## Open questions
 
-1. Does `POST /api/v1/devices` accept a node **without `modelId`** (the
-   definition still marks it required)? And is the onboarding key `obkey`?
-   Needs one test call against a real enterprise.
+1. ~~Node without a model / onboarding key field~~: answered, see *Tested*.
+   The model-less endpoint is unpublished, so it may change; the client must
+   report its errors clearly.
 2. Does ZEDEDA match the **soft serial** in `serialno` (the article says so for
    model-less onboarding), or also the hardware serial? Which one when both
    exist?
@@ -140,8 +159,8 @@ sequenceDiagram
 
 ## Plan
 
-1. Answer question 1 and 2 with a test user and a project without application
-   policy: one create, one lookup, one delete.
+1. ~~Answer question 1 with a test user~~ (done). Question 2 (soft serial
+   matching) is answered by a real installation with the feature.
 2. API client + in-memory session in the web management (unit-tested with a
    fake API).
 3. Settings, page, boot menu option, onboard endpoint.
