@@ -458,7 +458,9 @@ for which you have to know which soft serial ended up on which machine. Here:
    creates and deletes one test node
    ([how](../docs/design/zededa-onboarding.md#checking-a-zededa-user)).
 
-![ZEDEDA onboarding in the web management](../docs/images/web-zededa.png)
+| Web management | Console menu |
+|---|---|
+| ![ZEDEDA onboarding in the web management](../docs/images/web-zededa.png) | ![ZEDEDA onboarding in the console](../docs/images/console-zededa.png) |
 
 **Each time you install machines:**
 
