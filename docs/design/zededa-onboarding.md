@@ -139,9 +139,13 @@ sequenceDiagram
 2. **Settings** (stored, not secret): cluster, project, onboarding key
    (default filled in), name template (`eve-{mac}`), title template, tags,
    activate on creation. Stored like the other settings and part of the export.
-3. **Boot menu.** While a session is active and for images of EVE-OS 17.0.0-lts
-   and later: an installation option *Onboard in ZEDEDA* (on by default when
-   logged in). The summary shows the node name and the project.
+3. **Boot menu, only for images of EVE-OS 17.0.0-lts and later.** Their
+   summary becomes a small iPXE menu: the summary lines, the line *ZEDEDA:
+   will be registered as <name> in project <project>* (or why not), **Install
+   now [i]** and **Onboard in ZEDEDA: on/off [o]** (on by default). Not among
+   the general installation options: those are chosen before the image, and
+   the option must only exist for EVE-OS 17+. The summary of older images is
+   unchanged and says nothing about ZEDEDA.
 4. **Registration when `i` is pressed.** iPXE requests
    `http://SERVER:8080/eve/onboard?mac=${mac:hexhyp}&serial=${serial:uristring}&...`.
    The stack's web container passes that one path on to the management
@@ -161,6 +165,14 @@ sequenceDiagram
   prefixes.
 - The node name is built from a template with the MAC address; nothing the
   client sends goes into the API unchecked (strict character set).
+
+## Roadmap
+
+- **EVE-OS older than 17:** onboarding with a hardware model chosen for a
+  batch of identical machines (`POST /api/v1/devices` with `modelId`). ZEDEDA
+  requires the machine to match the model exactly, including network and IO
+  adapters, and the boot server cannot check that beforehand; so only for
+  batches of the same hardware, with the model shown in the summary.
 
 ## Open questions
 

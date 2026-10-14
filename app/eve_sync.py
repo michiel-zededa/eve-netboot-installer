@@ -910,40 +910,58 @@ ONBOARD_QUERY = ("mac=${mac:hexhyp}&serial=${serial:uristring}&product=${product
 
 
 def onboard_parts(template):
-    """Put the onboarding pieces in the menu (or drop their markers)."""
-    parts = {"#@ONBOARD_STATUS": "", "#@ONBOARD_ITEM": "", "#@ONBOARD_TOGGLE": "", "#@ONBOARD_CHECK": "",
-             "#@ONBOARD_SUMMARY": "", "#@ONBOARD_REGISTER": ""}
+    """Put the onboarding pieces in the menu (or drop their markers). Only for
+    images of EVE-OS 17.0.0-lts or later (eve_rel_ok): their summary becomes a
+    small menu with the ZEDEDA line and the option Onboard in ZEDEDA [o];
+    the summary of every other image stays as it is."""
+    parts = {"#@ONBOARD_CHECK": "", "#@ONBOARD_CONFIRM": "", "#@ONBOARD_REGISTER": ""}
     if ONBOARD_URL:
         url = ONBOARD_URL + "?action="
         parts.update({
-            "#@ONBOARD_STATUS": "iseq ${eve_onboard} 1 && set eve_onboard_s @@val_on@@ || "
-                                "set eve_onboard_s @@val_off@@",
-            "#@ONBOARD_ITEM": "item eve_o_onboard ${eve_sp}@@opt_onboard@@: ${eve_onboard_s}",
-            "#@ONBOARD_TOGGLE": ":eve_o_onboard\n"
-                                "iseq ${eve_onboard} 1 && set eve_onboard 0 || set eve_onboard 1\n"
-                                "goto eve_opt",
-            # whether this installation will be onboarded, shown in the summary
+            # whether this installation will be onboarded: asks the boot server
             "#@ONBOARD_CHECK": "\n".join([
                 "set eve_ob_do 0",
                 "clear eve_ob_s",
+                "iseq ${eve_rel_ok} 1 || goto eve_ob_checked",
+                "iseq ${eve_softserial} 1 || set eve_ob_s @@ob_needs_soft@@",
+                "iseq ${eve_softserial} 1 || goto eve_ob_checked",
                 "iseq ${eve_onboard} 1 || goto eve_ob_checked",
-                "iseq ${eve_rel_ok} 1 || goto eve_ob_old",
-                "iseq ${eve_softserial} 1 || goto eve_ob_nosoft",
                 "set eve_ob_ok 0",
                 "set eve_ob_s @@ob_unreachable@@",
                 f"chain --autofree {url}preview&{ONBOARD_QUERY} ||",
                 "iseq ${eve_ob_ok} 1 && set eve_ob_do 1 ||",
-                "goto eve_ob_checked",
-                ":eve_ob_old",
-                "set eve_ob_s @@ob_needs_new@@",
-                "goto eve_ob_checked",
-                ":eve_ob_nosoft",
-                "set eve_ob_s @@ob_needs_soft@@",
-                ":eve_ob_checked"]),
-            "#@ONBOARD_SUMMARY": "isset ${eve_ob_s} && echo  @@conf_onboard@@: ${eve_ob_s} ||",
+                ":eve_ob_checked",
+                "iseq ${eve_rel_ok} 1 && goto eve_confirm_ob ||"]),
+            # the summary of an EVE-OS 17+ image, as a menu: i installs, o switches onboarding
+            "#@ONBOARD_CONFIRM": "\n".join([
+                ":eve_confirm_ob",
+                "iseq ${eve_onboard} 1 && set eve_onboard_s @@val_on@@ || set eve_onboard_s @@val_off@@",
+                "menu ${eve_title}",
+                "item --gap @@conf_source@@: ${eve_dir}/",
+                "item --gap ISO: @@conf_iso_ram@@",
+                "item --gap @@conf_options@@: ${eve_opts}",
+                "isset ${eve_conx} && item --gap @@conf_console@@: ${eve_con} ${eve_conx} ||",
+                "isset ${eve_extra} && item --gap @@conf_extra@@: ${eve_extra} ||",
+                "iseq ${eve_k} 1 && item --gap @@conf_note@@: @@conf_k_warn@@ ||",
+                "isset ${eve_ob_s} && item --gap @@conf_onboard@@: ${eve_ob_s} ||",
+                "item --gap",
+                "iseq ${eve_blackbox} 1 && item --gap @@conf_bb@@ ||",
+                "iseq ${eve_blackbox} 1 || item --gap @@conf_wipe_warn@@",
+                "iseq ${eve_nuke} 1 && item --gap @@conf_nuke_warn@@ ||",
+                "item --gap",
+                "item --key i eve_boot ${eve_sp}@@ob_item_install@@",
+                "iseq ${eve_softserial} 1 && item --key o eve_ob_toggle ${eve_sp}@@opt_onboard@@: ${eve_onboard_s}  [o] ||",
+                "item eve_menu ${eve_sp}<< @@opt_back@@",
+                "choose --default eve_menu eve_cchoice || goto eve_menu",
+                "goto ${eve_cchoice}",
+                ":eve_ob_toggle",
+                "iseq ${eve_onboard} 1 && set eve_onboard 0 || set eve_onboard 1",
+                "goto eve_confirm",
+                ""]),
             # registered only now, after i: the node exists before EVE-OS first boots
             "#@ONBOARD_REGISTER": "\n".join([
                 "iseq ${eve_ob_do} 1 || goto eve_ob_done",
+                "echo ${cls}",
                 "echo @@boot_onboard@@",
                 "set eve_ob_ok 0",
                 "set eve_ob_s @@ob_unreachable@@",
@@ -975,7 +993,6 @@ iseq ${eve_nuke} 1 && set eve_nuke_s @@val_yes@@ || set eve_nuke_s @@val_no@@
 iseq ${eve_pause} 1 && set eve_pause_s @@val_on@@ || set eve_pause_s @@val_off@@
 iseq ${eve_debug} 1 && set eve_debug_s @@val_on@@ || set eve_debug_s @@val_off@@
 iseq ${eve_blackbox} 1 && set eve_bb_s @@val_bb_yes@@ || set eve_bb_s @@val_no@@
-#@ONBOARD_STATUS
 iseq ${eve_serial} none && set eve_serial_s @@val_none@@ || set eve_serial_s ${eve_serial}
 isset ${eve_extra} && set eve_extra_s ${eve_extra} || set eve_extra_s -
 menu @@opt_title@@
@@ -986,7 +1003,6 @@ item eve_o_server ${eve_sp}@@opt_server@@: ${eve_server_s}
 item --gap @@opt_gap_behaviour@@
 item eve_o_reboot ${eve_sp}@@opt_reboot@@: ${eve_reboot_s}
 item eve_o_soft ${eve_sp}@@opt_soft@@: ${eve_soft_s}
-#@ONBOARD_ITEM
 item eve_o_nuke ${eve_sp}@@opt_nuke@@: ${eve_nuke_s}
 item eve_o_pause ${eve_sp}@@opt_pause@@: ${eve_pause_s}
 item eve_o_debug ${eve_sp}@@opt_debug@@: ${eve_debug_s}
@@ -1025,7 +1041,6 @@ goto eve_opt
 :eve_o_soft
 iseq ${eve_softserial} 1 && set eve_softserial 0 || set eve_softserial 1
 goto eve_opt
-#@ONBOARD_TOGGLE
 :eve_o_nuke
 iseq ${eve_nuke} 1 && set eve_nuke 0 || set eve_nuke 1
 goto eve_opt
@@ -1078,7 +1093,6 @@ echo  ISO: @@conf_iso_ram@@
 echo  @@conf_options@@: ${eve_opts}
 isset ${eve_conx} && echo  @@conf_console@@: ${eve_con} ${eve_conx} ||
 isset ${eve_extra} && echo  @@conf_extra@@: ${eve_extra} ||
-#@ONBOARD_SUMMARY
 iseq ${eve_k} 1 && echo  ${eve_esc}[33m@@conf_note@@: @@conf_k_warn@@${eve_esc}[37m ||
 echo
 iseq ${eve_blackbox} 1 && echo  @@conf_bb@@ ||
@@ -1087,6 +1101,7 @@ iseq ${eve_nuke} 1 && echo  ${eve_esc}[31m@@conf_nuke_warn@@${eve_esc}[37m ||
 echo
 prompt --key i @@conf_press_i@@ && goto eve_boot || goto eve_menu
 
+#@ONBOARD_CONFIRM
 :eve_boot
 #@ONBOARD_REGISTER
 imgfree

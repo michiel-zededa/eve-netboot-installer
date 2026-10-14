@@ -87,6 +87,7 @@ All taken on a test VM in a documentation network (`192.0.2.0/24`).
 | **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
 | **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); an optional DHCP service of its own (proxyDHCP next to your DHCP server, or a full DHCP server for an isolated network); automatic security updates and app updates with rollback. |
+| **ZEDEDA onboarding** (test version) | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. The node is created without a model in an onboarding project, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware. You log in to ZEDEDA in the web management; the session is kept in memory only. See [vm/README.md](vm/README.md#onboard-installed-machines-in-zededa). |
 
 ## How it works
 

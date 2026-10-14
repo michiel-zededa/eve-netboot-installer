@@ -398,6 +398,14 @@ VM offers.
 > `1.7.0-rc.*`). The design and test results are in
 > [docs/design/zededa-onboarding.md](../docs/design/zededa-onboarding.md).
 
+> [!IMPORTANT]
+> **Only for EVE-OS 17.0.0-lts and later.** The nodes are created without a
+> hardware model, and only EVE-OS 17 and later report their own hardware to
+> ZEDEDA. An older EVE-OS would stay offline in ZEDEDA with an error that does
+> not clear. The boot menu therefore offers onboarding only for images of
+> EVE-OS 17.0.0-lts and later; older images are installed as before, without
+> onboarding (add those nodes in ZEDEDA yourself, with a model).
+
 **The idea:** install EVE-OS on a number of machines at the same time over the
 network, and have them onboarded in ZEDEDA in the same go, without looking up
 a single serial number. Normally every node has to be added in ZEDEDA with its
@@ -431,15 +439,24 @@ for which you have to know which soft serial ended up on which machine. Here:
    session is kept **in the VM's memory only**, never on disk or in an export.
    It lasts 4 hours, and ends when the VM or the web management restarts.
    Users with single sign-on paste a session token instead.
-2. Network boot the machines and choose an EVE-OS 17 (or later) image. The
-   summary shows *ZEDEDA: will be registered as eve-…* ; press **i**.
+2. Network boot the machines and choose an EVE-OS 17 (or later) image. Its
+   summary shows *ZEDEDA: will be registered as eve-…* and two choices:
+   **Install now [i]** and **Onboard in ZEDEDA: on [o]**. Press **i**: the VM
+   creates the node, then the installation starts.
 3. The overview on the same page fills while the machines install. After
    their first boot the nodes come online in the onboarding project; assign
    their adapters to network instances and move them to their own project.
 
-The option *Onboard in ZEDEDA* (installation options, on by default) turns it
-off for one machine. Older EVE-OS images, a switched-off soft serial or nobody
-logged in: the machine is installed but not onboarded, and the summary says why.
+**o** in that summary switches onboarding off (or on again) for this machine;
+it is on by default. The option is only there for EVE-OS 17 and later images:
+the summary of an older image looks exactly as without onboarding. With the
+soft serial switched off (installation options) or nobody logged in to ZEDEDA,
+the machine is installed but not onboarded, and the summary says why.
+
+**Roadmap:** onboarding for EVE-OS older than 17 by choosing a hardware model
+for a batch of identical machines. ZEDEDA requires such a machine to match the
+model exactly, including its network and IO adapters, so it only suits batches
+of the same hardware.
 
 ---
 

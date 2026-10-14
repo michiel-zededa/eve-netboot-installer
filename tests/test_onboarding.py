@@ -131,18 +131,29 @@ class MenuTest(unittest.TestCase):
         self.assertTrue(m.isascii())
         self.assertNotIn("#@", m)
         self.assertIn("set eve_onboard 1", m)
-        self.assertIn("item eve_o_onboard ${eve_sp}Onboard in ZEDEDA: ${eve_onboard_s}", m)
+        # not among the general installation options (chosen before the image)
+        opts = m[m.index(":eve_opt\n"):m.index(":eve_o_disk")]
+        self.assertNotIn("ZEDEDA", opts)
+        # the summary of an EVE-OS 17+ image is a menu with the option under o
+        self.assertIn("iseq ${eve_rel_ok} 1 && goto eve_confirm_ob ||", m)
+        confirm = m[m.index(":eve_confirm_ob"):m.index(":eve_boot\n")]
+        self.assertIn("item --key i eve_boot ${eve_sp}Install now [i]", confirm)
+        self.assertIn("item --key o eve_ob_toggle ${eve_sp}Onboard in ZEDEDA: ${eve_onboard_s}  [o]", confirm)
+        self.assertIn("isset ${eve_ob_s} && item --gap ZEDEDA: ${eve_ob_s} ||", confirm)
+        self.assertIn("choose --default eve_menu", confirm)          # Enter alone installs nothing
         self.assertIn(f"chain --autofree {url}?action=preview&mac=${{mac:hexhyp}}&serial=${{serial:uristring}}", m)
         self.assertIn(f"chain --autofree {url}?action=register&mac=${{mac:hexhyp}}", m)
         # registered only after i, before the installer is loaded
         boot = m.index(":eve_boot\n")
         self.assertLess(boot, m.index("action=register"))
         self.assertLess(m.index("action=register"), m.index("imgfree", boot))
-        # EVE-OS 16 cannot report its hardware: not onboarded
+        # older EVE-OS cannot report its hardware: no onboarding, the summary as before
         rel = re.findall(r"set eve_title EVE-OS (\S+) .*?\nset eve_rel_ok (\d)", m, re.S)
         self.assertEqual(rel, [("16.0.4-lts", "0"), ("17.0.0-lts", "1")])
+        check = m[m.index("set eve_ob_do 0"):m.index(":eve_ob_checked")]
+        self.assertTrue(check.startswith("set eve_ob_do 0\nclear eve_ob_s\niseq ${eve_rel_ok} 1 || goto eve_ob_checked"))
         # the soft serial (the MAC address) is what ZEDEDA matches on
-        self.assertIn("iseq ${eve_softserial} 1 || goto eve_ob_nosoft", m)
+        self.assertIn("iseq ${eve_softserial} 1 || goto eve_ob_checked", check)
 
     def test_unsafe_url_is_ignored(self):
         self.assertEqual(eve_sync.release_major({"tag": "17.0.0-lts"}), 17)
