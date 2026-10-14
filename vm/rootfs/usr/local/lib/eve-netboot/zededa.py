@@ -15,6 +15,7 @@ them: docs/design/zededa-onboarding.md.
                                       reports its hardware itself. Not in the
                                       published definitions: the ZEDEDA UI uses it)
 - DELETE /api/v1/devices/id/{id}     (delete a node this appliance created)
+- GET  /api/v1/devices/id/{id}/status (runState: did the machine come online?)
 """
 
 import json
@@ -160,8 +161,42 @@ class Client:
             "obkey": onboarding_key})
         return a.get("objectId", "")
 
+    def device_status(self, node_id):
+        """-> {"run_state", "state", "last_seen", "eve", "error"}; state is one of
+        waiting (the machine has not registered yet), starting, online (onboarded
+        completely), offline, error."""
+        _, a = self.call("GET", "/v1/devices/id/" + urllib.parse.quote(node_id, safe="") + "/status")
+        run = str(a.get("runState") or "RUN_STATE_UNSPECIFIED")
+        eve = ""
+        for sw in a.get("swInfo") or []:
+            if isinstance(sw, dict) and (sw.get("activated") or not eve):
+                eve = str(sw.get("shortVersion") or sw.get("longVersion") or eve)
+        errors = [e.get("description", "") for e in a.get("devError") or [] if isinstance(e, dict)]
+        return {"run_state": run, "state": run_category(run), "last_seen": str(a.get("lastUpdate") or ""),
+                "eve": eve, "error": "; ".join(x for x in errors if x)[:300]}
+
     def delete_device(self, node_id):
         self.call("DELETE", "/v1/devices/id/" + urllib.parse.quote(node_id, safe=""))
+
+
+STARTING = {"PROVISIONED", "INIT", "BOOTING", "REBOOTING", "RESTARTING", "DOWNLOADING", "VERIFYING", "LOADING",
+            "BASEOS_UPDATING", "CREATING_VOLUME", "START_DELAYED"}
+OFFLINE = {"OFFLINE", "HALTED", "HALTING", "SUSPECT", "UNKNOWN", "PURGING", "MAINTENANCE_MODE",
+           "PREPARING_POWEROFF", "POWERING_OFF", "PREPARED_POWEROFF"}
+
+
+def run_category(run_state):
+    """ZEDEDA's runState -> waiting / starting / online / offline / error."""
+    s = run_state.replace("RUN_STATE_", "")
+    if s == "ONLINE":
+        return "online"
+    if s == "ERROR":
+        return "error"
+    if s in STARTING:
+        return "starting"
+    if s in OFFLINE:
+        return "offline"
+    return "waiting"                      # UNPROVISIONED, UNSPECIFIED: not registered yet
 
 
 NUMBER_RE = re.compile(r"\{n(?::(\d))?\}")

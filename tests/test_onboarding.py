@@ -94,6 +94,21 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(zededa.ZededaError):
             zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
 
+    def test_node_status(self):
+        api = FakeApi({("GET", "/v1/devices/id/n1/status"): (200, {
+            "runState": "RUN_STATE_ONLINE", "lastUpdate": "2026-10-14T19:00:00Z",
+            "swInfo": [{"activated": False, "shortVersion": "16.0.0"}, {"activated": True, "shortVersion": "17.0.0-lts"}],
+            "devError": [{"description": "disk almost full"}]})})
+        st = zededa.Client("zedcontrol.example.net", token="T", opener=api).device_status("n1")
+        self.assertEqual(st, {"run_state": "RUN_STATE_ONLINE", "state": "online", "last_seen": "2026-10-14T19:00:00Z",
+                              "eve": "17.0.0-lts", "error": "disk almost full"})
+        for run, cat in (("RUN_STATE_UNPROVISIONED", "waiting"), ("RUN_STATE_UNSPECIFIED", "waiting"),
+                         ("RUN_STATE_PROVISIONED", "starting"), ("RUN_STATE_BOOTING", "starting"),
+                         ("RUN_STATE_OFFLINE", "offline"), ("RUN_STATE_SUSPECT", "offline"),
+                         ("RUN_STATE_ERROR", "error"), ("", "waiting")):
+            with self.subTest(run=run):
+                self.assertEqual(zededa.run_category(run), cat)
+
     def test_lookup_by_serial(self):
         api = FakeApi({("GET", f"/v1/devices/serial/{MAC}"): (200, {"name": "eve-old"})})
         c = zededa.Client("zedcontrol.example.net", token="T", opener=api)

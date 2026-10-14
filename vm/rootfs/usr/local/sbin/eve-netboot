@@ -1598,6 +1598,8 @@ def screen_zededa(s):
         cur = load_settings()
         on = get(cur, "ZEDEDA_ONBOARDING") == "yes"
         status, info = web_api("GET", "/api/zededa") if on else (0, {})
+        if status == 200 and isinstance(info, dict) and info.get("session"):
+            status, info = web_api("GET", "/api/zededa/status")      # the nodes' state in ZEDEDA
         info = info if isinstance(info, dict) else {}
         session = info.get("session") if status == 200 else None
         nodes = info.get("onboarded", []) if status == 200 else []
@@ -1613,6 +1615,10 @@ def screen_zededa(s):
                 cluster=session["cluster"], until=zededa_until(session.get("expires")))
         else:
             state = tr("adm_zo_not_logged_in_ui")
+        listed = [n for n in nodes if n.get("result") in ("created", "exists")]
+        if listed:
+            online = sum(1 for n in listed if (n.get("status") or {}).get("state") == "online")
+            state += "\n" + tr("adm_zo_summary", online=online, total=len(listed))
         items = [("settings", tr("adm_zo_settings"))]
         if on and status == 200:
             if session:
@@ -1675,15 +1681,26 @@ def zededa_login_result(title, code, answer):
 
 def screen_zededa_nodes(title, nodes, logged_in):
     """The onboarded machines; choosing one offers to delete its node in ZEDEDA."""
-    items = [(n["mac"], f"{cut(n['name'], 30):<30} {n['mac']}  {tr('adm_zo_result_' + n['result'])}")
-             for n in nodes]
+    def shown(n):
+        st = (n.get("status") or {}).get("state")
+        return tr("adm_zo_state_" + st) if st and n["result"] in ("created", "exists") else tr("adm_zo_result_" + n["result"])
+
+    items = [(n["mac"], f"{cut(n['name'], 24):<24} {n['mac']}  {cut(shown(n), 30)}") for n in nodes]
     mac = choose(title, tr("adm_zo_nodes_text"), items, cancel=tr("adm_btn_back"), ok=tr("adm_btn_open"))
     node = next(n for n in nodes if n["mac"] == mac)
     details = "\n".join(f"{k}: {v}" for k, v in (
         (tr("adm_zo_col_name"), node["name"]), (tr("adm_zo_col_mac"), node["mac"]),
         (tr("adm_zo_col_machine"), ", ".join(x for x in (node.get("product"), node.get("hardware_serial")) if x) or "-"),
         (tr("adm_zo_col_result"), tr("adm_zo_result_" + node["result"])),
+        (tr("adm_zo_col_state"), tr("adm_zo_state_" + ((node.get("status") or {}).get("state") or "unknown"))),
+        (tr("adm_zo_online_since"), zededa_until(node.get("online_since")) if node.get("online_since") else "-"),
+        (tr("adm_zo_last_seen"), (node.get("status") or {}).get("last_seen") or "-"),
+        (tr("adm_zo_eve_version"), (node.get("status") or {}).get("eve") or "-"),
         (tr("adm_zo_col_time"), zededa_until(node.get("time")))))
+    if (node.get("status") or {}).get("error"):
+        details += "\n" + node["status"]["error"]
+    if (node.get("status") or {}).get("state") == "waiting":
+        details += "\n\n" + tr("adm_zo_waiting_hint")
     if node["result"] not in ("created", "exists") or not node.get("node_id"):
         return msg(title, details + ("\n" + node["message"] if node.get("message") else ""))
     if not logged_in:

@@ -405,6 +405,7 @@ class FakeZededa:
     nodes = {}
     created = []
     logins = []
+    states = {}
 
     def __init__(self, cluster, token=None, opener=None):
         self.cluster, self.token = cluster, token
@@ -427,6 +428,12 @@ class FakeZededa:
     def device_by_serial(self, serial):
         return FakeZededa.nodes.get(serial)
 
+    def device_status(self, node_id):
+        state = FakeZededa.states.get(node_id, "waiting")
+        if isinstance(state, Exception):
+            raise state
+        return {"run_state": "RUN_STATE_X", "state": state, "last_seen": "", "eve": "17.0.0-lts", "error": ""}
+
     def create_modelless(self, name, title, project_id, serial, key):
         assert self.token == "SECRET-TOKEN"
         FakeZededa.created.append((name, project_id, serial, key))
@@ -440,7 +447,7 @@ class ZededaWebTest(WebBase):
 
     def setUp(self):
         super().setUp()
-        FakeZededa.nodes, FakeZededa.created, FakeZededa.logins = {}, [], []
+        FakeZededa.nodes, FakeZededa.created, FakeZededa.logins, FakeZededa.states = {}, [], [], {}
         p = mock.patch.object(web.zededa, "Client", FakeZededa)
         p.start()
         self.addCleanup(p.stop)
@@ -649,6 +656,36 @@ class ZededaWebTest(WebBase):
         self.assertEqual(ob["eve_ob_s"], "will be registered as eve-52-54-00-12-34-56 in project netboot")
         self.assertEqual(self.onboard()["eve_ob_s"], "registered as eve-52-54-00-12-34-56 in project netboot")
         self.assertEqual(len(FakeZededa.created), 2)
+
+    def test_state_of_the_onboarded_nodes(self):
+        self.zededa_login()
+        self.onboard()
+        status, body, _ = self.request("GET", "/api/zededa/status")
+        self.assertEqual(body["onboarded"][0]["status"]["state"], "waiting")
+        self.assertNotIn("online_since", body["onboarded"][0])
+        FakeZededa.states["node-1"] = "online"
+        status, body, _ = self.request("GET", "/api/zededa/status")          # within 20 s: not checked again
+        self.assertEqual(body["onboarded"][0]["status"]["state"], "waiting")
+        status, body, _ = self.request("GET", "/api/zededa/status?force=1")
+        node = body["onboarded"][0]
+        self.assertEqual((node["status"]["state"], node["status"]["eve"]), ("online", "17.0.0-lts"))
+        first = node["online_since"]
+        status, body, _ = self.request("GET", "/api/zededa/status?force=1")
+        self.assertEqual(body["onboarded"][0]["online_since"], first)      # the first time it was seen online
+        rows = list(csv.DictReader(io.StringIO(self.request("GET", "/api/zededa/export")[1].decode())))
+        self.assertEqual((rows[0]["state"], rows[0]["eve_version"]), ("online", "17.0.0-lts"))
+        self.assertTrue(rows[0]["online_since"])
+        # deleted in ZEDEDA by hand; a role that may not read nodes
+        FakeZededa.states["node-1"] = web.zededa.ZededaError(404, "not found")
+        self.assertEqual(self.request("GET", "/api/zededa/status?force=1")[1]["onboarded"][0]["status"]["state"], "gone")
+        FakeZededa.states["node-1"] = web.zededa.ZededaError(403, "forbidden")
+        self.assertEqual(self.request("GET", "/api/zededa/status?force=1")[1]["onboarded"][0]["status"]["state"],
+                         "noread")
+
+    def test_state_needs_a_session(self):
+        self.login()
+        status, body, _ = self.request("GET", "/api/zededa/status")
+        self.assertEqual((status, body["session"]), (200, None))
 
     def test_delete_and_export(self):
         deleted = []

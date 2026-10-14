@@ -103,6 +103,7 @@ export const api = {
     call<ZededaInfo & { warning: string }>("POST", "api/zededa/login", login),
   zededaLogout: () => call<{ ok: true }>("POST", "api/zededa/logout", {}),
   zededaDelete: (mac: string) => call<{ ok: true }>("POST", "api/zededa/delete", { mac }),
+  zededaStatus: (force = false) => call<ZededaInfo>("GET", `api/zededa/status${force ? "?force=1" : ""}`),
 };
 
 /** ZEDEDA onboarding: the session lives in the appliance's memory only. */
@@ -129,6 +130,14 @@ export interface ZededaInfo {
     hardware_serial: string;
     product: string;
     result: "created" | "exists" | "failed" | "deleted";
+    online_since?: number;
+    status?: {
+      state: "waiting" | "starting" | "online" | "offline" | "error" | "gone" | "noread" | "unknown";
+      run_state?: string;
+      last_seen?: string;
+      eve?: string;
+      error?: string;
+    };
     message: string;
     time: number;
   }[];

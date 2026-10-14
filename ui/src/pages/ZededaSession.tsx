@@ -2,13 +2,18 @@
 // or with the user's password (used once, never kept). The appliance keeps the token in
 // memory only; after a restart or when it expires, log in again.
 import { useEffect, useState } from "react";
-import { Download, LogIn, LogOut, Trash2, TriangleAlert } from "lucide-react";
+import { Download, LogIn, LogOut, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { api, type ZededaInfo } from "../admin";
 import { Card } from "../components";
 import { Confirm, errorText, useToast } from "../forms";
 import { useT } from "../i18n";
 
 const time = (s: number | null) => (s ? new Date(s * 1000).toLocaleString() : "?");
+
+const STATE_TONE: Record<string, string> = {
+  online: "ok", starting: "info", waiting: "warn", offline: "warn", error: "err", gone: "err",
+  noread: "neutral", unknown: "neutral",
+};
 
 export default function ZededaSession() {
   const t = useT();
@@ -21,10 +26,15 @@ export default function ZededaSession() {
   const [remove, setRemove] = useState<ZededaInfo["onboarded"][number] | null>(null);
   const toast = useToast();
 
-  const load = () => api.zededa().then(setInfo).catch((e) => setError(errorText(e)));
+  // with a ZEDEDA session also the state of the nodes (did the machines come online?)
+  const load = (force = false) =>
+    api.zededa()
+      .then((i) => (i.session ? api.zededaStatus(force) : i))
+      .then(setInfo)
+      .catch((e) => setError(errorText(e)));
   useEffect(() => {
     load();
-    const timer = setInterval(load, 15000);   // the overview fills while machines boot
+    const timer = setInterval(() => load(), 30000);   // the list fills while machines install and boot
     return () => clearInterval(timer);
   }, []);
 
@@ -67,6 +77,8 @@ export default function ZededaSession() {
   if (!info) return error ? <div className="alert err">{error}</div> : null;
   if (!info.enabled) return null;
   const s = info.session;
+  const nodes = info.onboarded.filter((n) => n.result === "created" || n.result === "exists");
+  const online = nodes.filter((n) => n.status?.state === "online").length;
   // a password needs the user and enterprise from the settings; an API token needs nothing else
   const withPassword = Boolean(info.user && info.enterprise);
 
@@ -125,8 +137,21 @@ export default function ZededaSession() {
         )}
       </Card>
       <Card title={t("adm_zo_onboarded")} actions={info.onboarded.length > 0 && (
-        <a className="btn slim" href="api/zededa/export" download><Download size={16} /> {t("adm_zo_export_csv")}</a>
+        <>
+          {s && (
+            <button className="btn slim" onClick={() => load(true)}><RefreshCw size={16} /> {t("adm_zo_check_now")}</button>
+          )}
+          <a className="btn slim" href="api/zededa/export" download><Download size={16} /> {t("adm_zo_export_csv")}</a>
+        </>
       )}>
+        {nodes.length > 0 && (
+          <p>
+            <span className={`pill ${online === nodes.length ? "ok" : "warn"}`}>
+              {t("adm_zo_summary", { online, total: nodes.length })}
+            </span>
+          </p>
+        )}
+        {nodes.some((n) => n.status?.state === "waiting") && <p className="muted small">{t("adm_zo_waiting_hint")}</p>}
         {info.onboarded.length === 0 ? (
           <p className="muted">{t("adm_zo_none_yet")}</p>
         ) : (
@@ -139,6 +164,7 @@ export default function ZededaSession() {
                   <th>{t("adm_zo_col_mac")}</th>
                   <th>{t("adm_zo_col_machine")}</th>
                   <th>{t("adm_zo_col_result")}</th>
+                  <th>{t("adm_zo_col_state")}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -154,6 +180,21 @@ export default function ZededaSession() {
                         {t(`adm_zo_result_${n.result}`)}
                       </span>
                       {n.result === "failed" && <div className="small err-text">{n.message}</div>}
+                    </td>
+                    <td>
+                      {n.result !== "failed" && n.result !== "deleted" && (
+                        <>
+                          <span className={`pill ${STATE_TONE[n.status?.state ?? "unknown"]}`}
+                            title={n.status?.run_state ?? ""}>
+                            {t(`adm_zo_state_${n.status?.state ?? "unknown"}`)}
+                          </span>
+                          <div className="small muted">
+                            {n.online_since ? `${t("adm_zo_online_since")} ${time(n.online_since)}` : ""}
+                            {n.status?.eve ? ` · ${t("adm_zo_eve_version")} ${n.status.eve}` : ""}
+                          </div>
+                          {n.status?.error && <div className="small err-text">{n.status.error}</div>}
+                        </>
+                      )}
                     </td>
                     <td>
                       {(n.result === "created" || n.result === "exists") && n.node_id && (

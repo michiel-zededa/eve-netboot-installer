@@ -29,6 +29,7 @@ Security
 that changes the system goes through its functions, exactly like the console.
 """
 
+import concurrent.futures
 import csv
 import datetime
 import hmac
@@ -66,6 +67,8 @@ MAC_RE = re.compile(r"^[0-9a-f]{2}(-[0-9a-f]{2}){5}$")
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 ONBOARD_PER_MINUTE = 60     # registrations from the boot menu, all machines together (batch installs)
 ONBOARD_KEEP = 200          # nodes remembered for the overview
+STATUS_EVERY = 20           # seconds between status checks of the onboarded nodes in ZEDEDA
+STATUS_MAX = 100            # nodes checked (the newest)
 
 
 class HttpError(Exception):
@@ -109,6 +112,7 @@ class App:
         self.onboarded = self.load_onboarded()
         self.onboard_times = []
         self.number_lock = threading.Lock()   # one registration at a time: unique sequence numbers
+        self.status_checked = 0.0
         # the console uses the ZEDEDA session through this key (core.WEB_LOCAL_KEY, /run, root only)
         self.local_key = secrets.token_hex(32)
 
@@ -396,6 +400,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, self.core.render_export(self.core.load_settings()), "text/plain; charset=utf-8",
                              {"Content-Disposition": 'attachment; filename="eve-netboot-settings.txt"'})
         if path == "/api/zededa":
+            return self.send(200, self.zededa_info())
+        if path == "/api/zededa/status":
+            self.refresh_status(force=query.get("force", ["0"])[0] == "1")
             return self.send(200, self.zededa_info())
         if path == "/api/zededa/export":
             name = f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv"
@@ -885,6 +892,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
         c.log(f"web: onboarding {mac} ({self.client_ip()}): {entry['result']} {entry['name']} {entry['message']}")
         return entry["result"] != "failed", text
 
+    def refresh_status(self, force=False):
+        """The state of the listed nodes in ZEDEDA (did the machine register and
+        come online?). Needs Edge Nodes: Read; at most every STATUS_EVERY s."""
+        z = self.app.zededa_session()
+        if not z:
+            return
+        with self.app.lock:
+            if not force and time.time() - self.app.status_checked < STATUS_EVERY:
+                return
+            self.app.status_checked = time.time()
+            todo = [e for e in self.app.onboarded
+                    if e.get("node_id") and e.get("result") in ("created", "exists")][:STATUS_MAX]
+
+        def check(entry):
+            try:
+                st = zededa.Client(z["cluster"], token=z["token"]).device_status(entry["node_id"])
+            except zededa.ZededaError as e:
+                st = {"state": {404: "gone", 403: "noread", 401: "unknown"}.get(e.status, "unknown"),
+                      "error": "" if e.status in (403, 404) else str(e)}
+            st["checked"] = time.time()
+            return entry, st
+
+        if not todo:
+            return
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(check, todo))
+        with self.app.lock:
+            for entry, st in results:
+                if st["state"] == "online" and not entry.get("online_since"):
+                    entry["online_since"] = st["checked"]
+                    self.core.log(f"web: ZEDEDA node {entry['name']} ({entry['mac']}) is online: onboarded")
+                entry["status"] = st
+            self.app.save_onboarded()
+
     def still_there(self, node, z):
         """Whether a node from the list still exists in ZEDEDA: True, False (it was
         deleted there, e.g. by hand), or None (the role may not read nodes, or no
@@ -920,11 +961,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(["time", "name", "mac", "soft_serial", "hardware_serial", "product", "project", "result",
-                    "node_id", "message"])
+                    "state", "online_since", "eve_version", "node_id", "message"])
+
+        def iso(t):
+            return datetime.datetime.fromtimestamp(t).isoformat(timespec="seconds") if t else ""
+
         for e in self.app.onboarded:
-            w.writerow([datetime.datetime.fromtimestamp(e.get("time", 0)).isoformat(timespec="seconds"),
-                        e.get("name", ""), e["mac"], e["mac"], e.get("hardware_serial", ""), e.get("product", ""),
-                        e.get("project", ""), e.get("result", ""), e.get("node_id", ""), e.get("message", "")])
+            st = e.get("status") or {}
+            w.writerow([iso(e.get("time", 0)), e.get("name", ""), e["mac"], e["mac"], e.get("hardware_serial", ""),
+                        e.get("product", ""), e.get("project", ""), e.get("result", ""), st.get("state", ""),
+                        iso(e.get("online_since")), st.get("eve", ""), e.get("node_id", ""), e.get("message", "")])
         return out.getvalue()
 
     def logs(self, source, lines):
