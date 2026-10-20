@@ -925,6 +925,10 @@ def onboard_parts(template):
                 "set eve_ob_do 0",
                 "clear eve_ob_s",
                 "iseq ${eve_rel_ok} 1 || goto eve_ob_checked",
+                # wipe all disks and black box mode install nothing: no node for them
+                "iseq ${eve_nuke} 1 && set eve_ob_s @@ob_nothing_installed@@ ||",
+                "iseq ${eve_blackbox} 1 && set eve_ob_s @@ob_nothing_installed@@ ||",
+                "isset ${eve_ob_s} && goto eve_ob_checked ||",
                 "iseq ${eve_softserial} 1 || set eve_ob_s @@ob_needs_soft@@",
                 "iseq ${eve_softserial} 1 || goto eve_ob_checked",
                 "iseq ${eve_onboard} 1 || goto eve_ob_checked",
@@ -949,10 +953,12 @@ def onboard_parts(template):
                 "isset ${eve_ob_s} && item --gap @@conf_onboard@@: ${eve_ob_s} ||",
                 "item --gap",
                 "iseq ${eve_blackbox} 1 && item --gap @@conf_bb@@ ||",
-                "iseq ${eve_blackbox} 1 || item --gap @@conf_wipe_warn@@",
+                "iseq ${eve_blackbox} 1 || iseq ${eve_nuke} 1 || item --gap @@conf_wipe_warn@@",
                 "iseq ${eve_nuke} 1 && item --gap @@conf_nuke_warn@@ ||",
                 "item --gap",
-                "item --key i eve_boot ${eve_sp}@@ob_item_install@@",
+                # eve_nuke_all_disks: the installer wipes every disk and powers off, installs nothing
+                "iseq ${eve_nuke} 1 && item --key i eve_boot ${eve_sp}@@ob_item_nuke@@ ||",
+                "iseq ${eve_nuke} 1 || item --key i eve_boot ${eve_sp}@@ob_item_install@@",
                 "iseq ${eve_softserial} 1 && item --key o eve_ob_toggle ${eve_sp}@@opt_onboard@@: ${eve_onboard_s}  [o] ||",
                 "iseq ${eve_ob_do} 1 && item --key n eve_ob_rename ${eve_sp}@@ob_item_name@@: ${eve_ob_name_s}  [n] ||",
                 "item eve_menu ${eve_sp}<< @@opt_back@@",
@@ -1106,10 +1112,14 @@ isset ${eve_extra} && echo  @@conf_extra@@: ${eve_extra} ||
 iseq ${eve_k} 1 && echo  ${eve_esc}[33m@@conf_note@@: @@conf_k_warn@@${eve_esc}[37m ||
 echo
 iseq ${eve_blackbox} 1 && echo  @@conf_bb@@ ||
-iseq ${eve_blackbox} 1 || echo  ${eve_esc}[33m@@conf_wipe_warn@@${eve_esc}[37m
+iseq ${eve_blackbox} 1 || iseq ${eve_nuke} 1 || echo  ${eve_esc}[33m@@conf_wipe_warn@@${eve_esc}[37m
 iseq ${eve_nuke} 1 && echo  ${eve_esc}[31m@@conf_nuke_warn@@${eve_esc}[37m ||
 echo
+# eve_nuke_all_disks: the installer wipes every disk and powers off, installs nothing
+iseq ${eve_nuke} 1 && goto eve_confirm_nuke ||
 prompt --key i @@conf_press_i@@ && goto eve_boot || goto eve_menu
+:eve_confirm_nuke
+prompt --key i @@conf_press_nuke@@ && goto eve_boot || goto eve_menu
 
 #@ONBOARD_CONFIRM
 :eve_boot

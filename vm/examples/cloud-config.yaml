@@ -101,7 +101,7 @@ eve_netboot:
   # ------------------------ defaults of the installation options --
   # EVE_DEFAULT_REBOOT: 1
   # EVE_DEFAULT_SOFT_SERIAL: 1
-  # EVE_DEFAULT_NUKE_ALL_DISKS: 0
+  # EVE_DEFAULT_NUKE_ALL_DISKS: 0   # 1 = wipe ALL disks, power off, install nothing
   # EVE_DEFAULT_SERIAL: none
   # EVE_DEFAULT_INSTALL_DISK: sda
   # EVE_DEFAULT_PERSIST_DISK: sdb,sdc
