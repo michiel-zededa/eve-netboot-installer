@@ -10,6 +10,12 @@ ZEDEDA yourself.
 
     python3 zededa_api_probe.py --cluster zedcontrol.zededa.net \
         --enterprise <enterprise> --user <user> --project <project name or ID>
+
+With --token it checks an API token instead, read-only (nothing is created):
+the token is asked here, never printed or stored; it shows how the cluster
+answers the calls the appliance makes with it.
+
+    python3 zededa_api_probe.py --cluster zedcontrol.zededa.net --token [--project <name or ID>]
 """
 import argparse
 import datetime
@@ -49,8 +55,9 @@ def tls_context():
 
 
 class Api:
-    def __init__(self, cluster):
+    def __init__(self, cluster, timeout=30):
         self.base = f"https://{cluster}/api"
+        self.timeout = timeout
         self.token = None
         self.ctx = tls_context()
 
@@ -63,7 +70,7 @@ class Api:
         if self.token:
             req.add_header("Authorization", "Bearer " + self.token)
         try:
-            with urllib.request.urlopen(req, timeout=30, context=self.ctx) as r:
+            with urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx) as r:
                 raw = r.read()
                 return r.status, (json.loads(raw) if raw else {})
         except urllib.error.HTTPError as e:
@@ -72,6 +79,8 @@ class Api:
                 return e.code, json.loads(raw)
             except ValueError:
                 return e.code, {"raw": raw.decode(errors="replace")[:500]}
+        except (urllib.error.URLError, OSError) as e:      # no answer (a timeout, DNS, TLS)
+            return 0, {"raw": f"no answer within {self.timeout} s: {getattr(e, 'reason', e)}"}
 
 
 def show(title, status, body, keys=None):
@@ -91,14 +100,52 @@ def expires_in(token):
         return str(exp)
 
 
+def check_token(a):
+    """Read-only: the calls the appliance makes with a pasted API token."""
+    api = Api(a.cluster, timeout=15)
+    raw = getpass.getpass(f"ZEDEDA API token for {a.cluster} (not shown, not stored): ")
+    token = raw.strip()
+    # what the token looks like, without showing it
+    print(f"\n== token: {len(token)} characters"
+          + (f", {len(raw) - len(token)} spaces/line breaks around it (removed)" if raw != token else "")
+          + (", CONTAINS SPACES OR LINE BREAKS INSIDE" if any(ch.isspace() for ch in token) else "")
+          + (", starts with 'Bearer ' (remove that)" if token.lower().startswith("bearer ") else "")
+          + (", non-ASCII characters" if not token.isascii() else ""))
+    del raw
+    api.token = token
+    checks = [("session (sessions/self: what the appliance checks)", "/v1/sessions/self"),
+              ("edge nodes (one: does the token work at all?)", "/v1/devices?summary=true&next.pageSize=1"),
+              ("own user (users/self)", "/v1/users/self"),
+              ("own enterprise (enterprises/self)", "/v1/enterprises/self"),
+              ("own role (roles/self)", "/v1/roles/self")]
+    if a.project:
+        checks.append(("project", "/v1/projects/name/" + urllib.parse.quote(a.project, safe="")))
+    for title, path in checks:
+        status, body = api.call("GET", path)
+        if status == 200 and isinstance(body, dict):
+            r = body.get("result") if isinstance(body.get("result"), dict) else body
+            u = r.get("user") if isinstance(r.get("user"), dict) else r
+            summary = {k: u.get(k) for k in ("username", "fullName", "name", "title", "id", "enterpriseId",
+                                              "roleId", "type", "state") if k in u}
+            print(f"\n== {title}: HTTP 200 {json.dumps(summary, default=str)}")
+        else:
+            show(title, status, body, ["cause", "error", "httpStatusCode", "httpStatusMsg", "detail", "raw"])
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--cluster", default="zedcontrol.zededa.net")
-    p.add_argument("--enterprise", required=True)
-    p.add_argument("--user", required=True)
-    p.add_argument("--project", required=True)
+    p.add_argument("--enterprise")
+    p.add_argument("--user")
+    p.add_argument("--project")
     p.add_argument("--onboarding-key", default=DEFAULT_ONBOARDING_KEY)
+    p.add_argument("--token", action="store_true", help="check an API token (read-only) instead of a user")
     a = p.parse_args()
+    if a.token:
+        return check_token(a)
+    if not (a.enterprise and a.user and a.project):
+        p.error("--enterprise, --user and --project are needed (or --token)")
 
     api = Api(a.cluster)
     pw = getpass.getpass(f"ZEDEDA password for {a.user} (not shown, not stored): ")

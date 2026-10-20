@@ -8,7 +8,7 @@ them: docs/design/zededa-onboarding.md.
 
 - POST /api/v1/login                 -> token {base64, expires (ns since 1970)}
 - POST /api/v1/logout
-- GET  /api/v1/sessions/self         (check a pasted token; its user account)
+- GET  /api/v1/users/self            (check a pasted token; its user account)
 - GET  /api/v1/enterprises/self      (the enterprise's name, when the role may read it)
 - GET  /api/v1/projects/name/{name}
 - GET  /api/v1/devices/serial/{serial}
@@ -122,24 +122,24 @@ class Client:
 
     def check(self):
         """Check a pasted API or session token: -> {"user": str, "enterprise": str,
-        "expires": seconds or None}. The account is in sessions/self's "user"
-        (a DetailedUser); the enterprise's name needs enterprises/self, which a
-        role may not read (then ""). Only "not authenticated" (401) rejects the
-        token; an endpoint the token may not use for this check is no reason to
-        refuse it."""
+        "expires": seconds or None}. users/self answers with the token's own
+        account (sessions/self is not used: a cluster may never answer it for
+        an API token); the enterprise's name needs enterprises/self, which a
+        role may not read (then ""). Only "not authenticated" (401) and no
+        answer reject the token; an endpoint the token may not use for this
+        check is no reason to refuse it."""
         try:
-            _, a = self.call("GET", "/v1/sessions/self")
+            _, a = self.call("GET", "/v1/users/self")
         except ZededaError as e:
             if e.status in (0, 401):
                 raise
             return {"user": "", "enterprise": "", "expires": None}
-        u = a.get("user") if isinstance(a.get("user"), dict) else {}
-        user = str(u.get("username") or u.get("email") or a.get("username") or a.get("userName") or "")
+        u = a.get("result") if isinstance(a.get("result"), dict) else a      # CrudResponseRead or the user
+        user = str(u.get("username") or u.get("email") or "")
         full = str(u.get("fullName") or "").strip()
         if full and user and full.lower() != user.lower():
             user = f"{full} ({user})"
-        token = a.get("token") if isinstance(a.get("token"), dict) else a
-        return {"user": user, "enterprise": self.enterprise_name(), "expires": expires_seconds(token)}
+        return {"user": user, "enterprise": self.enterprise_name(), "expires": None}
 
     def enterprise_name(self):
         """The name of the token's own enterprise, or "" when the role may not read it."""

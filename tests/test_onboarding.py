@@ -82,24 +82,25 @@ class ClientTest(unittest.TestCase):
         self.assertEqual((e.exception.status, str(e.exception)), (400, "Invalid Model"))
 
     def test_token_check(self):
-        # the account is in "user" (a DetailedUser), the enterprise's name in enterprises/self
-        api = FakeApi({("GET", "/v1/sessions/self"): (200, {"cause": "OK", "user": {
+        # the account from users/self (sessions/self may never answer for an API
+        # token), the enterprise's name from enterprises/self
+        api = FakeApi({("GET", "/v1/users/self"): (200, {"result": {
                            "id": "u1", "username": "onboard@example.net", "fullName": "Onboarding",
                            "enterpriseId": "e1"}}),
                        ("GET", "/v1/enterprises/self"): (200, {"result": {"id": "e1", "name": "ACME"}})})
         info = zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
         self.assertEqual((info["user"], info["enterprise"]), ("Onboarding (onboard@example.net)", "ACME"))
+        self.assertNotIn("/v1/sessions/self", [r[1] for r in api.requests])
         # a role that may not read its enterprise: the account only
-        api = FakeApi({("GET", "/v1/sessions/self"): (200, {"user": {"username": "u@example.net"},
-                                                             "token": {"expires": "1792003034371309674"}}),
+        api = FakeApi({("GET", "/v1/users/self"): (200, {"username": "u@example.net"}),
                        ("GET", "/v1/enterprises/self"): (403, {"error": [{"details": "forbidden"}]})})
         info = zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
-        self.assertEqual((info["user"], info["enterprise"], int(info["expires"])), ("u@example.net", "", 1792003034))
-        # an API token that may not read its session: accepted, without details
-        api = FakeApi({("GET", "/v1/sessions/self"): (403, {"error": [{"details": "forbidden"}]})})
+        self.assertEqual((info["user"], info["enterprise"]), ("u@example.net", ""))
+        # an API token that may not read its user: accepted, without details
+        api = FakeApi({("GET", "/v1/users/self"): (403, {"error": [{"details": "forbidden"}]})})
         self.assertEqual(zededa.Client("zedcontrol.example.net", token="T", opener=api).check(),
                          {"user": "", "enterprise": "", "expires": None})
-        api = FakeApi({("GET", "/v1/sessions/self"): (401, {"cause": "UNAUTHENTICATED"})})
+        api = FakeApi({("GET", "/v1/users/self"): (401, {"cause": "UNAUTHENTICATED"})})
         with self.assertRaises(zededa.ZededaError):
             zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
 

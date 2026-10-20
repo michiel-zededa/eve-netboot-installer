@@ -78,7 +78,7 @@ the behaviour of the API:
 | Call | Use | Notes |
 |---|---|---|
 | `POST /api/v1/login` | log in | `usernameAtRealm` / `username`, `password`, `enterpriseName` → `token: {base64, expires}`; `expires` in nanoseconds since 1970, a session lasts 4 hours. A wrong password answers 401 `CREDENTIAL_MISMATCH`, also with `noOfLoginAttemptsLeft: 0`, while the next correct login still works: the answer is shown as it is, never read as "locked". |
-| `GET /api/v1/sessions/self` | check a pasted token | `user: {username, fullName, email, enterpriseId, …}`: the account shown with the session |
+| `GET /api/v1/users/self` | check a pasted token | `{result: {username, fullName, email, enterpriseId, …}}`: the account shown with the session. Not `sessions/self`: a cluster may never answer that for an API token |
 | `GET /api/v1/enterprises/self` | the token's enterprise | `{result: {name, …}}`; optional, a role may not read it |
 | `POST /api/v1/logout` | log out | |
 | `GET /api/v1/projects/name/{name}` | project ID and policies | not called when the project is given by its ID |
@@ -130,9 +130,9 @@ sequenceDiagram
    no number. Every name is reduced to lower case letters, digits and
    hyphens, at most 63 characters.
 3. **Login, in memory only.** With a pasted **API token** (or session token)
-   nothing else is needed; it is checked with `GET sessions/self`, where only
-   401 rejects it (an API token that may not read its session is taken as
-   it is). Its account is that answer's `user` (`username`, `fullName`); the
+   nothing else is needed; it is checked with `GET users/self`, where only
+   401 or no answer rejects it (an API token that may not read its user is
+   taken as it is). Its account is that answer (`username`, `fullName`); the
    enterprise's name comes from `GET enterprises/self` when the role may read
    it. Both are shown with the session. With a **password**, the user and enterprise from the settings
    log in through `POST /api/v1/login` (local users only; single sign-on
