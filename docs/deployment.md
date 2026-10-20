@@ -346,6 +346,10 @@ If you only have x86_64 machines, `eve-x86_64.efi` for everyone is fine.
 Without a key press, the menu boots the local disk after 300 seconds
 (`ENI_MENU_TIMEOUT`).
 
+Which boot order suits your machines (disk first, or network first on a
+staging bench) and how to avoid a delay before the disk boots:
+[Boot order of the machines you install](boot-order.md).
+
 ---
 
 ## 7. Add your own installer ISOs
@@ -408,6 +412,6 @@ Without a key press, the menu boots the local disk after 300 seconds
 | Menu shows *(nothing synchronised yet)* | The first sync is still running or failed: `docker compose logs sync`. The host needs outbound HTTPS to `api.github.com`, `github.com` and `objects.githubusercontent.com`. |
 | `GitHub sync failed: HTTP Error 403` or `429` | Many API users behind the same public IP. Set `ENI_GITHUB_TOKEN` in `.env` (fine-grained token without permissions). |
 | Target hangs or reboots after *Loading installer ISO* | Not enough RAM: the whole ISO is held in memory. |
-| After EVE-OS is installed, the machine first shows *failed to start … UEFI PXEv4*, *PXEv6 … Not Found* and *Start HTTP Boot over IPv4*, and only later boots from disk | The firmware's boot order: *Boot from local disk* (or the menu timeout) hands the machine back to its firmware, which then tries PXE over IPv6 and HTTP Boot before the disk, each waiting for answers that never come. Put the disk directly after PXEv4, or disable PXEv6 and HTTP Boot in the firmware or the VM settings. |
+| After EVE-OS is installed, the machine first shows *failed to start … UEFI PXEv4*, *PXEv6 … Not Found* and *Start HTTP Boot over IPv4*, and only later boots from disk | The firmware's boot order: *Boot from local disk* (or the menu timeout) hands the machine back to its firmware, which then tries PXE over IPv6 and HTTP Boot before the disk, each waiting for answers that never come. Put the disk directly after PXEv4, or disable PXEv6 and HTTP Boot in the firmware or the VM settings: [boot order](boot-order.md). |
 | arm64 machine loads the x86 binary | DHCP gives everyone `eve-x86_64.efi`; use per-architecture rules ([step 5](#5-point-dhcp-at-the-server)). |
 | Status page not reachable | `HTTP_PORT` is taken or blocked: `docker compose ps` shows the port; try `curl -I http://localhost:8080/` on the host. |

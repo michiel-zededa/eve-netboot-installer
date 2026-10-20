@@ -90,7 +90,7 @@ All taken in a documentation network (`192.0.2.0/24`).
 | **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
 | **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); an optional DHCP service of its own (proxyDHCP next to your DHCP server, or a full DHCP server for an isolated network); automatic security updates and app updates with rollback. |
-| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. Node names follow a naming convention with the MAC address, the hardware serial or a sequence number (`bench1-node-{n:3}`), or are typed per machine in the boot menu. You log in to ZEDEDA in the web management or the console; the session is kept in memory only. The onboarded machines can be exported as CSV and their nodes deleted again from the appliance. See [ZEDEDA onboarding](#zededa-onboarding). |
+| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. Node names follow a naming convention with the MAC address, the hardware serial or a sequence number (`bench1-node-{n:3}`), or are typed per machine in the boot menu. You log in to ZEDEDA in the web management or the console; the session is kept in memory only. The list of onboarded machines shows each node's state in ZEDEDA; it can be exported and imported as CSV, cleaned up, and nodes can be deleted again from the appliance, one by one or several at once. See [ZEDEDA onboarding](#zededa-onboarding). |
 
 ## How it works
 
@@ -310,6 +310,12 @@ none. [docs/dhcp.md](docs/dhcp.md) explains the three ways and has examples for:
 - OPNsense/pfSense;
 - MikroTik, including per-architecture boot files.
 
+The machines' own **boot order** decides whether an installed machine boots
+EVE-OS from its disk at once, or first waits for network boot entries such as
+PXE over IPv6 and HTTP Boot: [docs/boot-order.md](docs/boot-order.md) explains
+both setups (disk first, or network first on a staging bench) and where to set
+them per platform.
+
 ## Your own installer ISOs
 
 Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DIR`. On the VM appliance, upload it in the web management or copy it to its SMB share ([vm/README.md](vm/README.md#7-your-own-installer-isos)).
@@ -321,7 +327,7 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 
 ## Operation
 
-On the VM appliance all of this is in its console menu and web management: logs, *Check GitHub now*, *Update EVE Netboot Installer* (with rollback) and automatic security updates ([vm/README.md: daily use](vm/README.md#6-daily-use)). Its web management and console menu also have *ZEDEDA onboarding*: the login to ZEDEDA, the list of onboarded machines, its CSV export and deleting a node. With Docker Compose:
+On the VM appliance all of this is in its console menu and web management: logs, *Check GitHub now*, *Update EVE Netboot Installer* (with rollback) and automatic security updates ([vm/README.md: daily use](vm/README.md#6-daily-use)). Its web management and console menu also have *ZEDEDA onboarding*: the login to ZEDEDA, the list of onboarded machines, its CSV export and import, removing entries and deleting nodes. With Docker Compose:
 
 | Task | Command |
 |---|---|
@@ -364,7 +370,7 @@ How the translations work:
   - PXE, TFTP and the HTTP mirror are unauthenticated by design. Run the server in a trusted network or VLAN.
   - Installer ISOs in the import folder may contain controller onboarding certificates, and anyone on that network can download them.
 - **Disk wiping:**
-  - Installing EVE erases disks. Keep network boot below the local disk in the boot order of production machines, or rely on the menu timeout.
+  - Installing EVE erases disks. Keep network boot below the local disk in the boot order of production machines, or rely on the menu timeout ([boot order](docs/boot-order.md)).
   - The stack never installs without an explicit key press.
 - **Integrity:** GitHub downloads are checked against the sha256 published with each release.
 - **ZEDEDA onboarding** (VM appliance):
@@ -397,7 +403,7 @@ How the translations work:
 │   ├── eve_sync.py        # mirror, import, menu and web UI data
 │   └── i18n/              # translations
 ├── docker/                # iPXE build script, embedded iPXE script, entrypoint
-├── docs/                  # deployment guide, how it works, DHCP configuration
+├── docs/                  # deployment guide, how it works, DHCP, boot order
 │   └── design/            # design notes (ZEDEDA onboarding, a check of a ZEDEDA user)
 ├── tests/                 # unit tests + EVE GRUB fixtures
 ├── ui/                    # web UI (React + Vite + TypeScript)
