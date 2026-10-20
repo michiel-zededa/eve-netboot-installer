@@ -152,6 +152,14 @@ class App:
             del self.onboarded[ONBOARD_KEEP:]
             self.save_onboarded()
 
+    def forget(self, macs):
+        """Remove machines from the list (on this VM only); -> how many."""
+        with self.lock:
+            before = len(self.onboarded)
+            self.onboarded = [e for e in self.onboarded if e["mac"] not in macs]
+            self.save_onboarded()
+            return before - len(self.onboarded)
+
     def onboarded_node(self, mac):
         """The node this appliance registered for a MAC address (not deleted), or None."""
         return next((e for e in self.onboarded if e["mac"] == mac and e.get("result") in ("created", "exists")),
@@ -512,7 +520,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "POST" and path == "/api/zededa/logout":
             return self.zededa_logout()
         if method == "POST" and path == "/api/zededa/delete":
-            return self.zededa_delete(str(self.json_body().get("mac") or "").lower())
+            return self.zededa_delete(self.macs(self.json_body()))
+        if method == "POST" and path == "/api/zededa/forget":
+            return self.zededa_forget(self.macs(self.json_body()))
+        if method == "POST" and path == "/api/zededa/import":
+            return self.zededa_import(str(self.json_body().get("text") or ""))
         if method == "DELETE" and path == "/api/images":
             return self.delete_image(query.get("file", [""])[0])
         raise HttpError(404, "Unknown API.")
@@ -938,27 +950,92 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except zededa.ZededaError:
             return None
 
-    def zededa_delete(self, mac):
-        """Delete the node this appliance registered for a MAC address, in ZEDEDA."""
+    @staticmethod
+    def macs(body):
+        """The MAC addresses a request names: "macs" (a list) or "mac"."""
+        macs = body.get("macs") if isinstance(body.get("macs"), list) else [body.get("mac")]
+        out = [str(m or "").lower() for m in macs][:ONBOARD_KEEP]
+        if not out or not all(MAC_RE.match(m) for m in out):
+            raise HttpError(400, "Invalid MAC address.")
+        return list(dict.fromkeys(out))
+
+    def zededa_delete(self, macs):
+        """Delete the nodes this appliance registered for these MAC addresses, in
+        ZEDEDA; they also leave the list. One MAC: its error is the answer."""
         c = self.core
-        node = self.app.onboarded_node(mac)
-        if not node or not node.get("node_id"):
-            raise HttpError(404, c.tr("adm_zo_delete_unknown"))
         z = self.app.zededa_session()
-        if not z:
-            raise HttpError(409, c.tr("adm_zo_delete_login"))
+        deleted, failed = [], []
+        for mac in macs:
+            node = self.app.onboarded_node(mac)
+            if not node or not node.get("node_id"):
+                failed.append((404, mac, mac, c.tr("adm_zo_delete_unknown")))
+                continue
+            if not z:
+                raise HttpError(409, c.tr("adm_zo_delete_login"))
+            try:
+                zededa.Client(z["cluster"], token=z["token"]).delete_device(node["node_id"])
+            except zededa.ZededaError as e:
+                if e.status == 403:
+                    failed.append((403, mac, node["name"], c.tr("adm_zo_delete_forbidden")))
+                    continue
+                if e.status != 404:                       # 404: already gone in ZEDEDA
+                    failed.append((502, mac, node["name"], c.tr("adm_zo_failed", error=str(e))))
+                    continue
+            self.app.forget([mac])
+            deleted.append(node["name"])
+            c.log(f"web: deleted ZEDEDA node {node['name']} ({mac})")
+        if len(macs) == 1 and failed:
+            raise HttpError(failed[0][0], failed[0][3])
+        self.send(200, {"ok": not failed, "deleted": deleted,
+                        "failed": [{"mac": m, "name": n, "error": e} for _, m, n, e in failed]})
+
+    def zededa_forget(self, macs):
+        """Remove machines from the list on this VM only; ZEDEDA is not asked."""
+        removed = self.app.forget(macs)
+        self.core.log(f"web: removed {removed} machine(s) from the onboarded list ({self.client_ip()})")
+        self.send(200, {"ok": True, "removed": removed})
+
+    def zededa_import(self, text):
+        """Add the machines of a list exported (CSV) on another VM; machines already
+        in the list are kept as they are. Only created nodes with an ID are useful:
+        their state is checked in ZEDEDA like any other."""
+        c = self.core
         try:
-            zededa.Client(z["cluster"], token=z["token"]).delete_device(node["node_id"])
-        except zededa.ZededaError as e:
-            if e.status == 403:
-                raise HttpError(403, c.tr("adm_zo_delete_forbidden")) from None
-            if e.status != 404:                           # 404: already gone in ZEDEDA
-                raise HttpError(502, c.tr("adm_zo_failed", error=str(e))) from None
+            rows = list(csv.DictReader(io.StringIO(text[:MAX_JSON])))
+        except csv.Error:
+            rows = []
+        if not rows or not {"mac", "name", "node_id"} <= set(rows[0]):
+            raise HttpError(400, c.tr("adm_zo_not_csv"))
+
+        def when(v):
+            try:
+                return datetime.datetime.fromisoformat(v).timestamp() if v else None
+            except ValueError:
+                return None
+
+        added, skipped = [], 0
         with self.app.lock:
-            node.update(result="deleted", deleted=time.time())
+            known = {e["mac"] for e in self.app.onboarded}
+            for r in rows:
+                mac = str(r.get("mac") or "").strip().lower()
+                if (not MAC_RE.match(mac) or mac in known or r.get("result") not in ("created", "exists")
+                        or not r.get("node_id")):
+                    skipped += 1
+                    continue
+                entry = {"mac": mac, "name": zededa.clean_name(r.get("name", "")) or mac,
+                         "node_id": str(r["node_id"])[:64], "result": r["result"],
+                         "time": when(r.get("time")) or time.time()}
+                for k in ("hardware_serial", "product", "project"):
+                    if r.get(k):
+                        entry[k] = str(r[k])[:100]
+                if when(r.get("online_since")):
+                    entry["online_since"] = when(r.get("online_since"))
+                known.add(mac)
+                added.append(entry)
+            self.app.onboarded = sorted(self.app.onboarded + added, key=lambda e: -(e.get("time") or 0))[:ONBOARD_KEEP]
             self.app.save_onboarded()
-        c.log(f"web: deleted ZEDEDA node {node['name']} ({mac})")
-        self.send(200, {"ok": True})
+        c.log(f"web: imported {len(added)} machine(s) into the onboarded list ({self.client_ip()})")
+        self.send(200, {"ok": True, "imported": len(added), "skipped": skipped, **self.zededa_info()})
 
     def zededa_csv(self):
         out = io.StringIO()

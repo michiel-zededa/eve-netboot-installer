@@ -511,8 +511,13 @@ pre.small-log { max-height: 240px; margin-top: 16px; background: var(--surface-2
 .table.compact th { padding: 8px 10px; }
 .table.compact tbody tr { cursor: default; }
 .table.compact td.nowrap { white-space: nowrap; }
-.table.compact th { white-space: nowrap; }
+.table.compact th { white-space: normal; vertical-align: bottom; }
+.table.compact td .pill { white-space: normal; }
 .card-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.selection-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.table th.select, .table td.select { width: 1%; padding-right: 0; }
+.table td.select input, .table th.select input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.table tbody tr.selected { background: var(--accent-soft); }
 .session-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .session-row p { margin: 0; }
 .page > .card + .card { margin-top: 20px; }

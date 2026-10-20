@@ -120,7 +120,10 @@ and the UI type check + build.
   and without reading projects. Node names: `{mac}`, `{serial}`, `{n}`/`{n:3}`
   (`ZEDEDA_NODE_NEXT`, taken only when a node is created) or a name typed in
   the menu (key n). The list of onboarded machines (`ONBOARDED`, no secrets)
-  survives restarts; the console reaches the session through the web
+  survives restarts; *Remove from list* / *Clean up* / CSV import never touch
+  ZEDEDA, nothing leaves the list automatically, and a node deleted in ZEDEDA
+  from the appliance also leaves the list. A pasted API token is checked with
+  `users/self` (a cluster may never answer `sessions/self` for one); the console reaches the session through the web
   management's local key (`WEB_LOCAL_KEY` in /run, loopback only).
 - Appliance: the console shows only status without login; the menu needs the
   admin password. Without cloud-init settings nothing starts until the setup

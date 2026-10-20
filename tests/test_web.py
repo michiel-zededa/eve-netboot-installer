@@ -704,13 +704,52 @@ class ZededaWebTest(WebBase):
         self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": self.MAC})[0], 200)
         self.assertEqual(deleted, ["node-1"])
         status, body, _ = self.request("GET", "/api/zededa")
-        self.assertEqual([n["result"] for n in body["onboarded"]], ["created", "deleted"])
+        self.assertEqual([n["mac"] for n in body["onboarded"]], ["52-54-00-00-00-99"])   # it left the list
         self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": self.MAC})[0], 404)   # deleted already
         self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": "52-54-00-aa-aa-aa"})[0], 404)
         # only with the admin
         self.cookie = None
         self.assertEqual(self.request("POST", "/api/zededa/delete", {"mac": "52-54-00-00-00-99"})[0], 401)
         self.assertEqual(self.request("GET", "/api/zededa/export")[0], 401)
+
+    def test_delete_several_and_remove_from_the_list(self):
+        deleted = []
+        FakeZededa.delete_device = lambda client, node_id: deleted.append(node_id)
+        self.addCleanup(delattr, FakeZededa, "delete_device")
+        self.zededa_login()
+        macs = [f"52-54-00-00-00-0{i}" for i in range(4)]
+        for m in macs:
+            self.onboard(mac=m)
+        status, body, _ = self.request("POST", "/api/zededa/delete", {"macs": macs[:2] + ["52-54-00-aa-aa-aa"]})
+        self.assertEqual((status, body["ok"], len(body["deleted"]), [f["mac"] for f in body["failed"]]),
+                         (200, False, 2, ["52-54-00-aa-aa-aa"]))
+        # remove from the list: this VM only, also without a ZEDEDA session
+        self.request("POST", "/api/zededa/logout", {})
+        deleted.clear()
+        status, body, _ = self.request("POST", "/api/zededa/forget", {"macs": [macs[2]]})
+        self.assertEqual((status, body["removed"], deleted), (200, 1, []))
+        self.assertEqual([n["mac"] for n in self.request("GET", "/api/zededa")[1]["onboarded"]], [macs[3]])
+        self.assertEqual(self.request("POST", "/api/zededa/forget", {"macs": ["not-a-mac"]})[0], 400)
+        self.cookie = None
+        self.assertEqual(self.request("POST", "/api/zededa/forget", {"macs": [macs[3]]})[0], 401)
+
+    def test_import_a_list(self):
+        self.zededa_login()
+        self.onboard()
+        csv_text = self.request("GET", "/api/zededa/export")[1].decode()
+        web.Handler.app = web.App(core)                     # a new VM: an empty list
+        web.Handler.app.forget([self.MAC])
+        self.login()
+        extra = ("\n2026-10-14T20:00:00,eve-x,52-54-00-00-00-77,52-54-00-00-00-77,,X2,netboot,failed,,,,,boom"
+                 "\n2026-10-14T20:00:00,eve-y,bad-mac,,,,,created,,,,n9,")
+        status, body, _ = self.request("POST", "/api/zededa/import", {"text": csv_text.rstrip("\r\n") + extra})
+        self.assertEqual((status, body["imported"], body["skipped"]), (200, 1, 2))
+        node = body["onboarded"][0]
+        self.assertEqual((node["mac"], node["name"], node["node_id"], node["product"]),
+                         (self.MAC, "eve-52-54-00-12-34-56", "node-1", "X1"))
+        # importing it again changes nothing
+        self.assertEqual(self.request("POST", "/api/zededa/import", {"text": csv_text})[1]["imported"], 0)
+        self.assertEqual(self.request("POST", "/api/zededa/import", {"text": "a,b\n1,2"})[0], 400)
 
     def test_delete_needs_the_right(self):
         def forbidden(client, node_id):

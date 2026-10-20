@@ -1,8 +1,8 @@
 // The ZEDEDA session of the onboarding: log in with an API (or session) token,
 // or with the user's password (used once, never kept). The appliance keeps the token in
 // memory only; after a restart or when it expires, log in again.
-import { useEffect, useState } from "react";
-import { Download, LogIn, LogOut, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BrushCleaning, Download, FileUp, ListX, LogIn, LogOut, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { api, type ZededaInfo } from "../admin";
 import { Card } from "../components";
 import { Confirm, errorText, useToast } from "../forms";
@@ -18,6 +18,13 @@ const when = (s?: number) => {
     : d.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
 };
 
+type Node = ZededaInfo["onboarded"][number];
+// a node this VM created (or found) in ZEDEDA and still there: it can be deleted there
+const inZededa = (n: Node) =>
+  (n.result === "created" || n.result === "exists") && Boolean(n.node_id) && n.status?.state !== "gone";
+// entries that only clutter the list: failed, deleted, or no longer in ZEDEDA
+const stale = (n: Node) => n.result === "failed" || n.result === "deleted" || n.status?.state === "gone";
+
 const STATE_TONE: Record<string, string> = {
   online: "ok", starting: "info", waiting: "warn", offline: "warn", error: "err", gone: "err",
   noread: "neutral", unknown: "neutral",
@@ -31,7 +38,10 @@ export default function ZededaSession() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
-  const [remove, setRemove] = useState<ZededaInfo["onboarded"][number] | null>(null);
+  // what to confirm: delete in ZEDEDA, or remove from the list (this VM only)
+  const [ask, setAsk] = useState<{ action: "delete" | "forget"; nodes: Node[] } | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   // with a ZEDEDA session also the state of the nodes (did the machines come online?)
@@ -54,6 +64,7 @@ export default function ZededaSession() {
       const r = await api.zededaLogin(by);
       setInfo(r);
       setWarning(r.warning);
+      load(true);                     // the nodes' state, now that ZEDEDA can be asked
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -72,20 +83,55 @@ export default function ZededaSession() {
     }
   };
 
-  const deleteNode = async (mac: string, name: string) => {
+  const run = async ({ action, nodes }: { action: "delete" | "forget"; nodes: Node[] }) => {
+    const macs = nodes.map((n) => n.mac);
     try {
-      await api.zededaDelete(mac);
-      toast(t("adm_zo_deleted", { name }));
+      if (action === "delete") {
+        const r = await api.zededaDelete(macs);
+        if (r.deleted.length) {
+          toast(r.deleted.length === 1 ? t("adm_zo_deleted", { name: r.deleted[0] })
+                                       : t("adm_zo_deleted_many", { n: r.deleted.length }));
+        }
+        if (r.failed.length) {
+          toast(t("adm_zo_delete_some_failed", { list: r.failed.map((f) => `${f.name}: ${f.error}`).join("; ") }), "err");
+        }
+      } else {
+        const r = await api.zededaForget(macs);
+        toast(t("adm_zo_forgotten", { n: r.removed }));
+      }
     } catch (e) {
       toast(errorText(e), "err");
     }
+    setSelected(new Set());
     load();
+  };
+
+  const importList = async (file: File) => {
+    if (fileRef.current) fileRef.current.value = "";
+    if (file.size > 1024 * 1024) return toast(t("adm_zo_not_csv"), "err");
+    try {
+      const r = await api.zededaImport(await file.text());
+      toast(t("adm_zo_imported", { n: r.imported, skipped: r.skipped }));
+      load(true);
+    } catch (e) {
+      toast(errorText(e), "err");
+    }
   };
 
   if (!info) return error ? <div className="alert err">{error}</div> : null;
   if (!info.enabled) return null;
   const s = info.session;
-  const nodes = info.onboarded.filter((n) => n.result === "created" || n.result === "exists");
+  // the machines that should be in ZEDEDA (not failed, not deleted there)
+  const nodes = info.onboarded.filter((n) => (n.result === "created" || n.result === "exists") && n.status?.state !== "gone");
+  const chosen = info.onboarded.filter((n) => selected.has(n.mac));
+  const deletable = chosen.filter(inZededa);
+  const clutter = info.onboarded.filter(stale);
+  const toggle = (mac: string) => setSelected((s) => {
+    const x = new Set(s);
+    if (x.has(mac)) x.delete(mac); else x.add(mac);
+    return x;
+  });
+  const all = info.onboarded.length > 0 && chosen.length === info.onboarded.length;
   const online = nodes.filter((n) => n.status?.state === "online").length;
   // the login method of the settings: an API token needs nothing else, a password the
   // user and enterprise from the settings
@@ -148,14 +194,21 @@ export default function ZededaSession() {
           </>
         )}
       </Card>
-      <Card title={t("adm_zo_onboarded")} actions={info.onboarded.length > 0 && (
+      <Card title={t("adm_zo_onboarded")} actions={
         <div className="card-actions">
-          {s && (
+          {s && info.onboarded.length > 0 && (
             <button className="btn slim" onClick={() => load(true)}><RefreshCw size={16} /> {t("adm_zo_check_now")}</button>
           )}
-          <a className="btn slim" href="api/zededa/export" download><Download size={16} /> {t("adm_zo_export_csv")}</a>
+          <button className="btn slim" title={t("adm_zo_import_help")} onClick={() => fileRef.current?.click()}>
+            <FileUp size={16} /> {t("adm_zo_import_csv")}
+          </button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv" hidden
+            onChange={(e) => e.target.files?.[0] && importList(e.target.files[0])} />
+          {info.onboarded.length > 0 && (
+            <a className="btn slim" href="api/zededa/export" download><Download size={16} /> {t("adm_zo_export_csv")}</a>
+          )}
         </div>
-      )}>
+      }>
         {nodes.length > 0 && (
           <p>
             <span className={`pill ${online === nodes.length ? "ok" : "warn"}`}>
@@ -164,6 +217,28 @@ export default function ZededaSession() {
           </p>
         )}
         {nodes.some((n) => n.status?.state === "waiting") && <p className="muted small">{t("adm_zo_waiting_hint")}</p>}
+        {(chosen.length > 0 || clutter.length > 0) && (
+          <div className="selection-bar">
+            {chosen.length > 0 ? (
+              <>
+                <span className="muted small">{t("adm_zo_selected", { n: chosen.length })}</span>
+                <button className="btn slim" onClick={() => setAsk({ action: "forget", nodes: chosen })}>
+                  <ListX size={16} /> {t("adm_zo_forget")}
+                </button>
+                <button className="btn slim danger" disabled={!s || deletable.length === 0}
+                  title={s ? undefined : t("adm_zo_delete_login")}
+                  onClick={() => setAsk({ action: "delete", nodes: deletable })}>
+                  <Trash2 size={16} /> {t("adm_zo_delete")}{deletable.length !== chosen.length ? ` (${deletable.length})` : ""}
+                </button>
+              </>
+            ) : (
+              <button className="btn slim" title={t("adm_zo_cleanup_help")}
+                onClick={() => setAsk({ action: "forget", nodes: clutter })}>
+                <BrushCleaning size={16} /> {t("adm_zo_cleanup", { n: clutter.length })}
+              </button>
+            )}
+          </div>
+        )}
         {info.onboarded.length === 0 ? (
           <p className="muted">{t("adm_zo_none_yet")}</p>
         ) : (
@@ -171,6 +246,10 @@ export default function ZededaSession() {
             <table className="table compact">
               <thead>
                 <tr>
+                  <th className="select">
+                    <input type="checkbox" aria-label={t("adm_zo_select_all")} checked={all}
+                      onChange={() => setSelected(all ? new Set() : new Set(info.onboarded.map((n) => n.mac)))} />
+                  </th>
                   <th>{t("adm_zo_col_time")}</th>
                   <th>{t("adm_zo_col_name")}</th>
                   <th>{t("adm_zo_col_mac")}</th>
@@ -181,7 +260,10 @@ export default function ZededaSession() {
               </thead>
               <tbody>
                 {info.onboarded.map((n) => (
-                  <tr key={n.mac}>
+                  <tr key={n.mac} className={selected.has(n.mac) ? "selected" : undefined}>
+                    <td className="select">
+                      <input type="checkbox" aria-label={n.name} checked={selected.has(n.mac)} onChange={() => toggle(n.mac)} />
+                    </td>
                     <td className="nowrap">{when(n.time)}</td>
                     <td className="nowrap"><strong>{n.name}</strong></td>
                     <td className="mono nowrap">{n.mac}</td>
@@ -212,10 +294,14 @@ export default function ZededaSession() {
                         </>
                       )}
                     </td>
-                    <td>
-                      {(n.result === "created" || n.result === "exists") && n.node_id && (
+                    <td className="nowrap">
+                      <button className="icon-btn small" title={t("adm_zo_forget")} aria-label={t("adm_zo_forget")}
+                        onClick={() => setAsk({ action: "forget", nodes: [n] })}>
+                        <ListX size={16} />
+                      </button>
+                      {inZededa(n) && (
                         <button className="icon-btn small" title={s ? t("adm_zo_delete") : t("adm_zo_delete_login")}
-                          aria-label={t("adm_zo_delete")} disabled={!s} onClick={() => setRemove(n)}>
+                          aria-label={t("adm_zo_delete")} disabled={!s} onClick={() => setAsk({ action: "delete", nodes: [n] })}>
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -227,9 +313,16 @@ export default function ZededaSession() {
           </div>
         )}
       </Card>
-      {remove && (
-        <Confirm title={t("adm_zo_delete")} text={t("adm_zo_delete_q", { name: remove.name })} confirm={t("adm_zo_delete")}
-          danger onConfirm={() => deleteNode(remove.mac, remove.name)} onClose={() => setRemove(null)} />
+      {ask && (
+        <Confirm danger={ask.action === "delete"}
+          title={ask.action === "delete" ? t("adm_zo_delete") : t("adm_zo_forget")}
+          text={ask.action === "delete"
+            ? (ask.nodes.length === 1 ? t("adm_zo_delete_q", { name: ask.nodes[0].name })
+                                      : t("adm_zo_delete_many_q", { n: ask.nodes.length,
+                                                                     names: ask.nodes.map((n) => n.name).join(", ") }))
+            : t("adm_zo_forget_q", { n: ask.nodes.length, names: ask.nodes.map((n) => n.name).join(", ") })}
+          confirm={ask.action === "delete" ? t("adm_zo_delete") : t("adm_zo_forget")}
+          onConfirm={() => run(ask)} onClose={() => setAsk(null)} />
       )}
     </>
   );

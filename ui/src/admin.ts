@@ -102,7 +102,12 @@ export const api = {
   zededaLogin: (login: { password?: string; token?: string }) =>
     call<ZededaInfo & { warning: string }>("POST", "api/zededa/login", login),
   zededaLogout: () => call<{ ok: true }>("POST", "api/zededa/logout", {}),
-  zededaDelete: (mac: string) => call<{ ok: true }>("POST", "api/zededa/delete", { mac }),
+  zededaDelete: (macs: string[]) =>
+    call<{ ok: boolean; deleted: string[]; failed: { mac: string; name: string; error: string }[] }>(
+      "POST", "api/zededa/delete", { macs }),
+  zededaForget: (macs: string[]) => call<{ ok: true; removed: number }>("POST", "api/zededa/forget", { macs }),
+  zededaImport: (text: string) =>
+    call<ZededaInfo & { imported: number; skipped: number }>("POST", "api/zededa/import", { text }),
   zededaStatus: (force = false) => call<ZededaInfo>("GET", `api/zededa/status${force ? "?force=1" : ""}`),
 };
 

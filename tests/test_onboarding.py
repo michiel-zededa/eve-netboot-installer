@@ -275,3 +275,52 @@ class SettingsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConsoleNodesTest(unittest.TestCase):
+    """The console's list of onboarded machines: the same actions as the web UI."""
+    NODES = [
+        {"mac": "52-54-00-00-00-01", "name": "bench-001", "result": "created", "node_id": "n1",
+         "status": {"state": "online"}},
+        {"mac": "52-54-00-00-00-02", "name": "bench-002", "result": "created", "node_id": "n2",
+         "status": {"state": "gone"}},
+        {"mac": "52-54-00-00-00-03", "name": "bench-003", "result": "failed", "message": "boom"},
+    ]
+
+    def run_screen(self, choices, checks=(), logged_in=True):
+        calls = []
+
+        def web_api(method, path, body=None):
+            calls.append((path, body))
+            if path.endswith("/delete"):
+                return 200, {"deleted": ["x"] * len(body["macs"]), "failed": []}
+            return 200, {"removed": len(body["macs"])}
+
+        with mock.patch.object(app, "choose", side_effect=list(choices)), \
+                mock.patch.object(app, "checklist", side_effect=[list(checks)]), \
+                mock.patch.object(app, "yesno", return_value=True), \
+                mock.patch.object(app, "msg"), mock.patch.object(app, "web_api", side_effect=web_api):
+            app.screen_zededa_nodes("T", self.NODES, logged_in)
+        return calls
+
+    def test_clean_up_removes_failed_and_deleted_entries_only_from_the_list(self):
+        self.assertEqual(self.run_screen(["_cleanup"]),
+                         [("/api/zededa/forget", {"macs": ["52-54-00-00-00-02", "52-54-00-00-00-03"]})])
+
+    def test_several_at_once(self):
+        # delete in ZEDEDA: only the nodes it has
+        self.assertEqual(self.run_screen(["_select", "delete"], ["52-54-00-00-00-01", "52-54-00-00-00-03"]),
+                         [("/api/zededa/delete", {"macs": ["52-54-00-00-00-01"]})])
+        self.assertEqual(self.run_screen(["_select", "forget"], ["52-54-00-00-00-01", "52-54-00-00-00-03"]),
+                         [("/api/zededa/forget", {"macs": ["52-54-00-00-00-01", "52-54-00-00-00-03"]})])
+
+    def test_one_machine(self):
+        self.assertEqual(self.run_screen(["52-54-00-00-00-01", "delete"]),
+                         [("/api/zededa/delete", {"macs": ["52-54-00-00-00-01"]})])
+        # without a ZEDEDA session only "remove from list" is offered
+        with mock.patch.object(app, "choose", side_effect=["52-54-00-00-00-01", app.Cancel()]) as choose, \
+                mock.patch.object(app, "web_api") as web_api:
+            with self.assertRaises(app.Cancel):
+                app.screen_zededa_nodes("T", self.NODES, False)
+        self.assertEqual([tag for tag, _ in choose.call_args_list[1].args[2]], ["forget"])
+        web_api.assert_not_called()

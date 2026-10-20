@@ -165,12 +165,24 @@ sequenceDiagram
 6. **The list of onboarded machines** (`/etc/eve-netboot/zededa-onboarded.json`,
    no secrets, survives restarts, the newest 200): time, node name and ID,
    project, MAC address, product and hardware serial, and the result
-   (created, already there, failed with the controller's message, deleted).
-   The web management and the console show it; *Export* gives it as CSV
-   (`GET /api/zededa/export`); *Delete* deletes a node in ZEDEDA
-   (`POST /api/zededa/delete`), only for nodes in the list, while logged in.
+   (created, already there, failed with the controller's message), and the
+   node's state in ZEDEDA (a node deleted there: *gone*).
+   The web management and the console show it:
+   - *Export* gives it as CSV (`GET /api/zededa/export`); *Import* adds the
+     usable rows of such a CSV (`POST /api/zededa/import {text}`: created
+     nodes with an ID whose MAC address is not in the list yet), to move the
+     list to a new VM.
+   - *Remove from list* (`POST /api/zededa/forget {macs}`) changes only this
+     list, without a ZEDEDA session; *Clean up* is the same for the failed
+     entries and the nodes gone from ZEDEDA. Nothing is removed automatically:
+     a ZEDEDA outage or a role without Read must never empty the list.
+   - *Delete in ZEDEDA* (`POST /api/zededa/delete {macs}`) deletes nodes in
+     ZEDEDA, only nodes in the list, while logged in; each deleted node leaves
+     the list. One node: its error is the answer; several: the answer lists
+     the ones that failed.
 7. **Console.** The console menu has the same *ZEDEDA onboarding* screen:
-   settings, login/logout, the list with delete, and the export (saved in the
+   settings, login/logout, the list with the same actions (one machine or
+   *Select several...*), import, and the export (saved in the
    admin's home folder and on the SMB share). The session stays in the web
    management's process; the console uses it through the web management's
    API on `127.0.0.1` with a key the web management makes at every start and

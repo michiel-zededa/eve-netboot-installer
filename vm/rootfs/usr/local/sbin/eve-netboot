@@ -1350,7 +1350,8 @@ def checklist(title, text, items, selected):
     args = []
     for tag, label in items:
         args += [tag, label, "ON" if tag in selected else "OFF"]
-    rc, out = wt("--checklist", title, text, str(len(items)), *args, height=len(items) + rows(text) + 7,
+    rc, out = wt("--checklist", title, text, str(min(len(items), 14)), *args,
+                 height=min(len(items), 14) + rows(text) + 7,
                  extra=["--ok-button", tr("adm_btn_ok"), "--cancel-button", tr("adm_btn_back"),
                         "--separate-output", "--notags"])
     if rc != 0:
@@ -1622,7 +1623,8 @@ def screen_zededa(s):
                 cluster=session["cluster"], until=zededa_until(session.get("expires")))
         else:
             state = tr("adm_zo_not_logged_in_ui")
-        listed = [n for n in nodes if n.get("result") in ("created", "exists")]
+        listed = [n for n in nodes if n.get("result") in ("created", "exists")
+                  and (n.get("status") or {}).get("state") != "gone"]
         if listed:
             online = sum(1 for n in listed if (n.get("status") or {}).get("state") == "online")
             state += "\n" + tr("adm_zo_summary", online=online, total=len(listed))
@@ -1639,6 +1641,8 @@ def screen_zededa(s):
                     items.append(("token", tr("adm_zo_login_token")))
         if nodes:
             items += [("nodes", f"{tr('adm_zo_onboarded')} ({len(nodes)})"), ("export", tr("adm_zo_export"))]
+        if on and status == 200:
+            items.append(("import", tr("adm_zo_import_csv")))
         try:
             c = choose(title, tr("adm_sec_zededa_text") + "\n\n" + state, items,
                        cancel=tr("adm_btn_done"), ok=tr("adm_btn_open"))
@@ -1665,6 +1669,8 @@ def screen_zededa(s):
                 web_api("POST", "/api/zededa/logout", {})
             elif c == "nodes":
                 screen_zededa_nodes(title, nodes, session is not None)
+            elif c == "import":
+                zededa_import_list(title)
             elif c == "export":
                 code, text = web_api("GET", "/api/zededa/export")
                 if code != 200:
@@ -1699,14 +1705,91 @@ def zededa_login_result(title, code, answer):
         msg(title, answer.get("error", str(answer)) if isinstance(answer, dict) else str(answer), tone="err")
 
 
+def zededa_stale(n):
+    """An entry that only clutters the list: failed, deleted, or no longer in ZEDEDA."""
+    return n["result"] in ("failed", "deleted") or (n.get("status") or {}).get("state") == "gone"
+
+
+def zededa_in_zededa(n):
+    """A node this VM created (or found) in ZEDEDA and still there: it can be deleted there."""
+    return (n["result"] in ("created", "exists") and bool(n.get("node_id"))
+            and (n.get("status") or {}).get("state") != "gone")
+
+
+def zededa_act(title, action, chosen):
+    """Delete nodes in ZEDEDA, or remove machines from the list (this VM only), after asking."""
+    names = ", ".join(n["name"] for n in chosen)
+    if action == "delete":
+        q = (tr("adm_zo_delete_q", name=chosen[0]["name"]) if len(chosen) == 1
+             else tr("adm_zo_delete_many_q", n=len(chosen), names=cut(names, 300)))
+        if not yesno(title, q, yes=tr("adm_zo_delete"), no=tr("adm_btn_cancel"), default_no=True, tone="err"):
+            return
+        code, answer = web_api("POST", "/api/zededa/delete", {"macs": [n["mac"] for n in chosen]})
+        if code != 200:
+            return msg(title, answer.get("error", "") if isinstance(answer, dict) else str(answer), tone="err")
+        done = answer.get("deleted", [])
+        text = (tr("adm_zo_deleted", name=done[0]) if len(done) == 1 else tr("adm_zo_deleted_many", n=len(done)))
+        failed = answer.get("failed", [])
+        if failed:
+            text += "\n\n" + tr("adm_zo_delete_some_failed",
+                                  list="; ".join(f"{f['name']}: {f['error']}" for f in failed))
+        return msg(title, text, tone="err" if failed else "ok")
+    if not yesno(title, tr("adm_zo_forget_q", n=len(chosen), names=cut(names, 300)), yes=tr("adm_zo_forget"),
+                 no=tr("adm_btn_cancel")):
+        return
+    code, answer = web_api("POST", "/api/zededa/forget", {"macs": [n["mac"] for n in chosen]})
+    msg(title, tr("adm_zo_forgotten", n=answer.get("removed", 0)) if code == 200 else
+        (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if code == 200 else "err")
+
+
+def zededa_import_list(title):
+    """Add the machines of a list exported (CSV) on another VM, from the import
+    folder (SMB share) or the admin's home folder."""
+    places = [IMPORT, f"/home/{ADMIN}"]
+    files = []
+    for d in places:
+        try:
+            files += [os.path.join(d, n) for n in sorted(os.listdir(d))
+                      if n.lower().endswith(".csv") and not n.startswith(".")]
+        except OSError:
+            pass
+    if not files:
+        return msg(title, tr("adm_zo_import_none", share=f"\\\\{primary_ip() or 'VM'}\\eve-import",
+                             home=f"/home/{ADMIN}"), tone="warn")
+    path = choose(title, tr("adm_zo_import_help") + "\n\n" + tr("adm_zo_import_pick"),
+                  [(f, f) for f in files[-14:]], cancel=tr("adm_btn_cancel"))
+    code, answer = web_api("POST", "/api/zededa/import", {"text": read(path)[:1 << 20]})
+    msg(title, tr("adm_zo_imported", n=answer.get("imported", 0), skipped=answer.get("skipped", 0)) if code == 200
+        else (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if code == 200 else "err")
+
+
 def screen_zededa_nodes(title, nodes, logged_in):
-    """The onboarded machines; choosing one offers to delete its node in ZEDEDA."""
+    """The onboarded machines: one to see it, delete its node in ZEDEDA or remove
+    it from the list; several at once; or clean up the entries that only clutter."""
     def shown(n):
         st = (n.get("status") or {}).get("state")
         return tr("adm_zo_state_" + st) if st and n["result"] in ("created", "exists") else tr("adm_zo_result_" + n["result"])
 
-    items = [(n["mac"], f"{cut(n['name'], 24):<24} {n['mac']}  {cut(shown(n), 30)}") for n in nodes]
+    clutter = [n for n in nodes if zededa_stale(n)]
+    items = [("_select", tr("adm_zo_select"))]
+    if clutter:
+        items.append(("_cleanup", tr("adm_zo_cleanup", n=len(clutter))))
+    items += [(n["mac"], f"{cut(n['name'], 24):<24} {n['mac']}  {cut(shown(n), 30)}") for n in nodes]
     mac = choose(title, tr("adm_zo_nodes_text"), items, cancel=tr("adm_btn_back"), ok=tr("adm_btn_open"))
+    if mac == "_cleanup":
+        return zededa_act(title, "forget", clutter)
+    if mac == "_select":
+        picked = checklist(title, tr("adm_zo_select_text"),
+                           [(n["mac"], f"{cut(n['name'], 24):<24} {cut(shown(n), 30)}") for n in nodes], [])
+        chosen = [n for n in nodes if n["mac"] in picked]
+        if not chosen:
+            return
+        deletable = [n for n in chosen if zededa_in_zededa(n)]
+        acts = [("forget", tr("adm_zo_forget"))]
+        if logged_in and deletable:
+            acts.append(("delete", tr("adm_zo_delete") + (f" ({len(deletable)})" if len(deletable) != len(chosen) else "")))
+        act = choose(title, tr("adm_zo_with_selected", n=len(chosen)), acts, cancel=tr("adm_btn_cancel"))
+        return zededa_act(title, act, deletable if act == "delete" else chosen)
     node = next(n for n in nodes if n["mac"] == mac)
     details = "\n".join(f"{k}: {v}" for k, v in (
         (tr("adm_zo_col_name"), node["name"]), (tr("adm_zo_col_mac"), node["mac"]),
@@ -1719,18 +1802,18 @@ def screen_zededa_nodes(title, nodes, logged_in):
         (tr("adm_zo_col_time"), zededa_until(node.get("time")))))
     if (node.get("status") or {}).get("error"):
         details += "\n" + node["status"]["error"]
+    if node.get("message"):
+        details += "\n" + node["message"]
     if (node.get("status") or {}).get("state") == "waiting":
         details += "\n\n" + tr("adm_zo_waiting_hint")
-    if node["result"] not in ("created", "exists") or not node.get("node_id"):
-        return msg(title, details + ("\n" + node["message"] if node.get("message") else ""))
-    if not logged_in:
-        return msg(title, details + "\n\n" + tr("adm_zo_delete_login"))
-    if yesno(title, details + "\n\n" + tr("adm_zo_delete_q", name=node["name"]), yes=tr("adm_zo_delete"),
-             no=tr("adm_btn_cancel"), default_no=True, tone="err"):
-        code, answer = web_api("POST", "/api/zededa/delete", {"mac": node["mac"]})
-        ok = code == 200
-        msg(title, tr("adm_zo_deleted", name=node["name"]) if ok else
-            (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if ok else "err")
+    acts = [("forget", tr("adm_zo_forget"))]
+    if zededa_in_zededa(node):
+        if logged_in:
+            acts.append(("delete", tr("adm_zo_delete")))
+        else:
+            details += "\n\n" + tr("adm_zo_delete_login")
+    act = choose(title, details, acts, cancel=tr("adm_btn_back"))
+    zededa_act(title, act, [node])
 
 
 # ---- step by step, for the setup wizard (and the network, which belongs together)

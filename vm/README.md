@@ -501,20 +501,39 @@ soft serial switched off (installation options) or nobody logged in to ZEDEDA,
 the machine is installed but not onboarded, and the summary says why.
 
 **The list of onboarded machines** is kept on the VM (it holds no secrets) and
-survives restarts:
+survives restarts. While someone is logged in to ZEDEDA, the VM checks every
+node's state there (waiting, starting, online, offline, error) and shows how
+many machines are onboarded completely. A node that was deleted in ZEDEDA
+itself shows as **Deleted in ZEDEDA**.
 
-- **Export:** *Export (CSV)* in the web management, or *Export the list (CSV)*
-  in the console (saved in the admin's home folder and on the SMB share). One
-  line per machine: time, node name, MAC address (soft serial), hardware
-  serial, product, project, result and node ID; for example to label the
-  machines or to record where each one went.
-- **Delete:** the bin next to a node in the web management, or choose the
-  machine in the console's list. It deletes the node in ZEDEDA; the machine
-  keeps EVE-OS but is no longer known to the controller (install it again to
-  onboard it again). Only nodes this VM created can be deleted, while logged
-  in, and the role needs **Edge Nodes: Delete**.
+| Action | Web management | Console | ZEDEDA |
+|---|---|---|---|
+| **Export** the list | *Export (CSV)* | *Export the list (CSV)*: saved in the admin's home folder and on the SMB share | not changed |
+| **Import** a list | *Import a list (CSV)* | *Import a list (CSV)*: from the SMB share or the admin's home folder | not changed |
+| **Remove from list** | the list icon next to a machine, or select several | choose the machine, or *Select several...* | not changed |
+| **Clean up the list** | *Clean up the list (n)*: failed entries and nodes deleted in ZEDEDA | the same, at the top of the list | not changed |
+| **Delete in ZEDEDA** | the bin next to a machine, or select several | choose the machine, or *Select several...* | **the node is deleted** |
+
+- **Export:** one line per machine: time, node name, MAC address (soft
+  serial), hardware serial, product, project, result, state, online since,
+  EVE-OS version and node ID; for example to label the machines or to record
+  where each one went.
+- **Import:** adds the machines of a list exported on another VM, for example
+  when you [replace the VM](#9-replace-the-vm-with-a-newer-version). Machines
+  already in the list stay as they are; failed and deleted entries are skipped.
+  Their state is checked in ZEDEDA like any other.
+- **Remove from list** and **Clean up** only change the list on this VM: they
+  need no ZEDEDA login and never touch ZEDEDA. A removed machine that is
+  installed again is simply registered again (or recognised, when its node
+  still exists).
+- **Delete in ZEDEDA** deletes the node in the controller and removes the
+  machine from the list. The machine keeps EVE-OS but is no longer known to
+  the controller (install it again to onboard it again). Only nodes this VM
+  created, while logged in, and the role needs **Edge Nodes: Delete**. When a
+  node cannot be deleted, the others still are and the message says which one
+  failed and why.
 - A machine that is installed again is recognised from the list and gets no
-  second node.
+  second node, as long as its node still exists in ZEDEDA.
 
 **Roadmap:** onboarding for EVE-OS older than 17 by choosing a hardware model
 for a batch of identical machines. ZEDEDA requires such a machine to match the
@@ -564,7 +583,12 @@ move to it without setting everything up again:
 4. Go through the setup steps; the old values are filled in. Set the admin password (passwords are never exported).
 5. If the old VM had a **fixed address**: power the old VM off before you choose **Apply**, or the two VMs use the same address.
 6. **DHCP:** with a fixed address or `SERVER_IP` nothing changes. With DHCP, the new VM has a new MAC address: move the DHCP reservation to it, or update next-server.
-7. Copy your own ISOs to the new VM ([step 7](#7-your-own-installer-isos)) and delete the old VM.
+7. Copy your own ISOs to the new VM ([step 7](#7-your-own-installer-isos)).
+8. **ZEDEDA onboarding:** the settings come with the import, the login does not
+   (log in again on the new VM). To keep the list of onboarded machines, export
+   it on the old VM (*Export (CSV)*) and import it on the new one (*Import a list
+   (CSV)*, see [onboarding](#onboard-installed-machines-in-zededa)).
+9. Delete the old VM.
 
 With cloud-init (ZEDEDA) it is simpler: deploy the new image with the same
 custom configuration. The exported text is valid cloud-init user-data too.
@@ -641,7 +665,7 @@ the default value. Both work as they are, as cloud-init user-data:
 | The browser warns about the certificate on port 8443 | Expected: the VM makes its own certificate. Accept it once for this address (Safari: *Show Details → visit this website*; Chrome: *Advanced → Proceed*; Firefox: *Advanced → Accept the Risk*). |
 | Port 8443 does not answer | Web management is off after a setup on the VM's screen: menu → *Advanced settings → Web management*. |
 | After a network change in the browser the page is gone | Open the new address within 2 minutes and confirm there; otherwise the previous settings come back by themselves. |
-| After EVE-OS is installed, the machine shows *failed to start Boot0002 "UEFI PXEv4"*, *PXEv6 … Not Found* and *Start HTTP Boot over IPv4* before it boots from its disk | The firmware's boot order. *Boot from local disk* (or the menu's timeout) hands the machine back to its firmware, which then tries its next boot entries: PXE over IPv6 and HTTP Boot each wait for answers that do not come. Put the disk directly after *PXEv4* in the boot order, or disable PXEv6 and HTTP Boot in the firmware (or the hypervisor's VM settings); the machine then boots from disk at once. |
+| After EVE-OS is installed, the machine shows *failed to start Boot0002 "UEFI PXEv4"*, *PXEv6 … Not Found* and *Start HTTP Boot over IPv4* before it boots from its disk | The firmware's boot order. *Boot from local disk* (or the menu's timeout) hands the machine back to its firmware, which then tries its next boot entries: PXE over IPv6 and HTTP Boot each wait for answers that do not come. Put the disk directly after *PXEv4* in the boot order, or disable PXEv6 and HTTP Boot in the firmware (or the hypervisor's VM settings); the machine then boots from disk at once. Per platform: [boot order](../docs/boot-order.md). |
 | *ZEDEDA: registration failed: …* in the summary | The controller's own words: for example a project with an application policy, a name already in use, or a role without *Edge Nodes: Create*. The machine is installed anyway; add the node by hand or install it again. |
 | Forgot the admin password | Log in with an SSH key if you set one, or deploy a new VM and import the settings ([step 9](#9-replace-the-vm-with-a-newer-version)). |
 
