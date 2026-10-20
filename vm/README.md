@@ -576,6 +576,8 @@ release (*3 of 7 image layers*), then the restart and the check of the services.
 A step that takes longer than a few seconds shows for how long, so a large
 download never looks frozen.
 
+![A system update in progress on the Updates page](../docs/images/web-updates.png)
+
 Tip: take a snapshot of the VM before updating if your hypervisor supports it.
 
 ---
