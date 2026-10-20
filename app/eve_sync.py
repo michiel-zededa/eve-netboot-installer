@@ -811,7 +811,6 @@ def render_menu(entries, github_checked):
         a("set eve_onboard 1")
         a("clear eve_ob_name")
     a("set eve_debug 0")
-    a("set eve_blackbox 0")
     for var, key in (("eve_disk", "disk"), ("eve_persist", "persist"),
                      ("eve_server", "server"), ("eve_extra", "extra")):
         val = ipxe_value(D[key])
@@ -925,9 +924,8 @@ def onboard_parts(template):
                 "set eve_ob_do 0",
                 "clear eve_ob_s",
                 "iseq ${eve_rel_ok} 1 || goto eve_ob_checked",
-                # wipe all disks and black box mode install nothing: no node for them
+                # wipe all disks installs nothing: no node for it
                 "iseq ${eve_nuke} 1 && set eve_ob_s @@ob_nothing_installed@@ ||",
-                "iseq ${eve_blackbox} 1 && set eve_ob_s @@ob_nothing_installed@@ ||",
                 "isset ${eve_ob_s} && goto eve_ob_checked ||",
                 "iseq ${eve_softserial} 1 || set eve_ob_s @@ob_needs_soft@@",
                 "iseq ${eve_softserial} 1 || goto eve_ob_checked",
@@ -952,8 +950,7 @@ def onboard_parts(template):
                 "iseq ${eve_k} 1 && item --gap @@conf_note@@: @@conf_k_warn@@ ||",
                 "isset ${eve_ob_s} && item --gap @@conf_onboard@@: ${eve_ob_s} ||",
                 "item --gap",
-                "iseq ${eve_blackbox} 1 && item --gap @@conf_bb@@ ||",
-                "iseq ${eve_blackbox} 1 || iseq ${eve_nuke} 1 || item --gap @@conf_wipe_warn@@",
+                "iseq ${eve_nuke} 1 || item --gap @@conf_wipe_warn@@",
                 "iseq ${eve_nuke} 1 && item --gap @@conf_nuke_warn@@ ||",
                 "item --gap",
                 # eve_nuke_all_disks: the installer wipes every disk and powers off, installs nothing
@@ -1008,7 +1005,6 @@ iseq ${eve_softserial} 1 && set eve_soft_s ${mac:hexhyp} || set eve_soft_s @@val
 iseq ${eve_nuke} 1 && set eve_nuke_s @@val_yes@@ || set eve_nuke_s @@val_no@@
 iseq ${eve_pause} 1 && set eve_pause_s @@val_on@@ || set eve_pause_s @@val_off@@
 iseq ${eve_debug} 1 && set eve_debug_s @@val_on@@ || set eve_debug_s @@val_off@@
-iseq ${eve_blackbox} 1 && set eve_bb_s @@val_bb_yes@@ || set eve_bb_s @@val_no@@
 iseq ${eve_serial} none && set eve_serial_s @@val_none@@ || set eve_serial_s ${eve_serial}
 isset ${eve_extra} && set eve_extra_s ${eve_extra} || set eve_extra_s -
 menu @@opt_title@@
@@ -1022,7 +1018,6 @@ item eve_o_soft ${eve_sp}@@opt_soft@@: ${eve_soft_s}
 item eve_o_nuke ${eve_sp}@@opt_nuke@@: ${eve_nuke_s}
 item eve_o_pause ${eve_sp}@@opt_pause@@: ${eve_pause_s}
 item eve_o_debug ${eve_sp}@@opt_debug@@: ${eve_debug_s}
-item eve_o_bb ${eve_sp}@@opt_bb@@: ${eve_bb_s}
 item --gap @@opt_gap_console@@
 item eve_o_serial ${eve_sp}@@opt_serial@@: ${eve_serial_s}
 item eve_o_extra ${eve_sp}@@opt_extra@@: ${eve_extra_s}
@@ -1066,9 +1061,6 @@ goto eve_opt
 :eve_o_debug
 iseq ${eve_debug} 1 && set eve_debug 0 || set eve_debug 1
 goto eve_opt
-:eve_o_bb
-iseq ${eve_blackbox} 1 && set eve_blackbox 0 || set eve_blackbox 1
-goto eve_opt
 :eve_o_serial
 iseq ${eve_serial} none && set eve_serial ttyS0 && goto eve_opt ||
 iseq ${eve_serial} ttyS0 && set eve_serial ttyS1 && goto eve_opt ||
@@ -1096,7 +1088,6 @@ isset ${eve_server} && set eve_opts ${eve_opts} eve_install_server=${eve_server}
 iseq ${eve_nuke} 1 && set eve_opts ${eve_opts} eve_nuke_all_disks ||
 iseq ${eve_pause} 1 && set eve_opts ${eve_opts} eve_pause_before_install ||
 iseq ${eve_debug} 1 && set eve_opts ${eve_opts} eve_install_debug=true linuxkit.runc_console=1 ||
-iseq ${eve_blackbox} 1 && set eve_opts ${eve_opts} eve_blackbox ||
 clear eve_conx
 iseq ${eve_serial} none || set eve_conx console=${eve_serial},115200n8
 #@ONBOARD_CHECK
@@ -1111,8 +1102,7 @@ isset ${eve_conx} && echo  @@conf_console@@: ${eve_con} ${eve_conx} ||
 isset ${eve_extra} && echo  @@conf_extra@@: ${eve_extra} ||
 iseq ${eve_k} 1 && echo  ${eve_esc}[33m@@conf_note@@: @@conf_k_warn@@${eve_esc}[37m ||
 echo
-iseq ${eve_blackbox} 1 && echo  @@conf_bb@@ ||
-iseq ${eve_blackbox} 1 || iseq ${eve_nuke} 1 || echo  ${eve_esc}[33m@@conf_wipe_warn@@${eve_esc}[37m
+iseq ${eve_nuke} 1 || echo  ${eve_esc}[33m@@conf_wipe_warn@@${eve_esc}[37m
 iseq ${eve_nuke} 1 && echo  ${eve_esc}[31m@@conf_nuke_warn@@${eve_esc}[37m ||
 echo
 # eve_nuke_all_disks: the installer wipes every disk and powers off, installs nothing

@@ -172,12 +172,11 @@ class MenuTest(unittest.TestCase):
                 self.assertTrue(m.isascii())
                 self.assertIn("iseq ${eve_nuke} 1 && goto eve_confirm_nuke ||", m)
                 self.assertIn("prompt --key i Press [i] to wipe all disks", m)
-                self.assertIn("iseq ${eve_blackbox} 1 || iseq ${eve_nuke} 1 || echo", m)   # not "wipes the target disk"
+                self.assertIn("iseq ${eve_nuke} 1 || echo", m)   # not "wipes the target disk"
                 self.assertIn("NOTHING is installed", m)
         m = self.render("http://192.0.2.20:8443/ipxe/onboard")
         check = m[m.index("set eve_ob_do 0"):m.index(":eve_ob_checked")]
         self.assertIn("iseq ${eve_nuke} 1 && set eve_ob_s nothing is installed: not onboarded ||", check)
-        self.assertIn("iseq ${eve_blackbox} 1 && set eve_ob_s nothing is installed: not onboarded ||", check)
         self.assertLess(check.index("isset ${eve_ob_s} && goto eve_ob_checked"), check.index("action=preview"))
         confirm = m[m.index(":eve_confirm_ob"):m.index(":eve_boot\n")]
         self.assertIn("iseq ${eve_nuke} 1 && item --key i eve_boot ${eve_sp}Wipe all disks and power off [i] ||", confirm)
