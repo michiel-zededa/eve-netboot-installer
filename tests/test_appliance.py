@@ -316,6 +316,21 @@ class VersionTest(unittest.TestCase):
         self.assertIsNone(app.version_tuple("ghcr.io/a/b:dev-abc1234"))
         self.assertLess(app.version_tuple("v1.9.0"), app.version_tuple("v1.10.0"))
 
+    def test_latest_release_without_the_api(self):
+        """the releases/latest redirect, so the API's rate limit does not apply"""
+        import email.message
+        import urllib.error
+        headers = email.message.Message()
+        headers["Location"] = "https://github.com/michiel-zededa/eve-netboot-installer/releases/tag/v1.7.3"
+        opener = unittest.mock.Mock()
+        opener.open.side_effect = urllib.error.HTTPError("u", 302, "Found", headers, None)
+        with unittest.mock.patch.object(app.urllib.request, "build_opener", return_value=opener), \
+             unittest.mock.patch.object(app.urllib.request, "urlopen") as api:
+            self.assertEqual(app.latest_release(), "v1.7.3")
+        api.assert_not_called()
+        self.assertEqual(opener.open.call_args.args[0].full_url,
+                         f"https://github.com/{app.REPO}/releases/latest")
+
 
 class RenderTest(unittest.TestCase):
 
