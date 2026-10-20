@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HELPER = os.path.join(HERE, "..", "vm", "rootfs", "usr", "local", "sbin", "eve-netboot")
@@ -443,3 +444,99 @@ class LoginScriptTest(unittest.TestCase):
             with open(calls) as f:
                 self.assertEqual(f.read().split("\n")[:-1],
                                  ["menu", "shell 1", "menu", "shell 1", "menu"])
+
+
+class UpdateProgressTest(unittest.TestCase):
+    """The progress of the system and app updates: apt's status lines, docker's pull lines."""
+
+    def test_apt_status_lines(self):
+        self.assertEqual(app.apt_status("dlstatus:3:27.2727:Retrieving file 3 of 11"),
+                         ("download", 27.2727, "Retrieving file 3 of 11"))
+        # the package name can carry its architecture after a colon
+        self.assertEqual(app.apt_status("pmstatus:libc6:amd64:12.5:Unpacking libc6 (amd64)"),
+                         ("install", 12.5, "Unpacking libc6 (amd64)"))
+        self.assertIsNone(app.apt_status("pmconffile:/etc/x:/etc/x.dpkg-new:'yes'"))
+        self.assertIsNone(app.apt_status("Reading package lists..."))
+
+    def test_apt_count(self):
+        sim = ("NOTE: This is only a simulation!\nInst libc6 [2.41-1] (2.41-2 Debian:13 [arm64])\n"
+               "Inst openssl [3.5.0-1] (3.5.1-1 Debian:13 [arm64])\nConf libc6 (2.41-2)\nRemv oldpkg [1.0]\n")
+        self.assertEqual(app.apt_count(sim), 3)
+        self.assertEqual(app.apt_count("0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n"), 0)
+
+    def test_docker_pull_layers(self):
+        p = app.PullProgress()
+        for line in ("1.7.1: Pulling from michiel-zededa/eve-netboot-installer",
+                     "aaaaaaaaaaaa: Already exists", "bbbbbbbbbbbb: Pulling fs layer",
+                     "cccccccccccc: Pulling fs layer", "bbbbbbbbbbbb: Download complete"):
+            p.feed(line)
+        self.assertEqual((p.total, p.done), (3, 1))
+        self.assertAlmostEqual(p.fraction, 0.5)
+        p.feed("bbbbbbbbbbbb: Pull complete")
+        p.feed("cccccccccccc: Pull complete")
+        self.assertEqual((p.done, p.fraction), (3, 1.0))
+        self.assertFalse(p.feed("Digest: sha256:0123"))
+
+    def test_stage(self):
+        part = app.stage(10, 40)
+        self.assertEqual((part(0), part(0.5), part(1), part(2)), (10, 25, 40, 40))
+
+    def test_run_progress_reads_output_and_the_status_fd(self):
+        lines, status = [], []
+        log = os.path.join(tempfile.mkdtemp(), "log")
+        with unittest.mock.patch.object(app, "LOG", log):
+            out = app.run_progress(["sh", "-c", "echo 'Get:1 http://example.net x'; "
+                                    "echo 'pmstatus:libc6:arm64:50:Unpacking libc6' >&{status_fd}; echo done"],
+                                   on_line=lines.append, on_status=status.append)
+            self.assertEqual(lines, ["Get:1 http://example.net x", "done"])
+            self.assertEqual(status, ["pmstatus:libc6:arm64:50:Unpacking libc6"])
+            self.assertIn("done", out)
+            with self.assertRaises(RuntimeError):
+                app.run_progress(["sh", "-c", "echo broken; exit 3"])
+
+    def test_system_update_reports_its_stages(self):
+        calls = []
+
+        def run_progress(cmd, on_line=None, on_status=None, **kw):
+            if "update" in cmd:
+                on_line("Get:1 http://deb.debian.org/debian trixie InRelease [140 kB]")
+            else:
+                on_status("dlstatus:1:50:Retrieving file 1 of 2")
+                on_status("pmstatus:libc6:arm64:50:Unpacking libc6 (arm64)")
+            return ""
+
+        sim = unittest.mock.Mock(stdout="Inst libc6 [1] (2 Debian:13 [arm64])\nInst openssl [1] (2 Debian:13 [arm64])\n")
+        with unittest.mock.patch.multiple(app, run_progress=run_progress, run=lambda *a, **k: sim,
+                                          is_configured=lambda: False, log=lambda *a: None,
+                                          load_settings=lambda: {}):
+            ok, reboot, text = app.update_system(lambda t, p=None, d=None: calls.append((t, p, d)))
+        self.assertTrue(ok)
+        percents = [p for _, p, _ in calls if p is not None]
+        self.assertEqual(percents, sorted(percents))                 # the bar only moves forward
+        self.assertEqual(percents[-1], 100)
+        details = [d for _, _, d in calls if d]
+        self.assertIn("2 packages to update", details)
+        self.assertIn("Unpacking libc6 (arm64)", details)
+        self.assertIn("http://deb.debian.org/debian trixie InRelease [140 kB]", details)
+
+    def test_ticker_shows_how_long_a_step_takes(self):
+        calls = []
+        ticker = app.Ticker(lambda t, p=None, d=None: calls.append((t, p, d)), after=1)
+        try:
+            ticker("Downloading package lists ...", 5, "Retrieving file 20 of 22")
+            for _ in range(40):
+                if any(d and d.endswith(" s)") for _, _, d in calls):
+                    break
+                app.time.sleep(0.1)
+        finally:
+            ticker.stop()
+        ticks = [c for c in calls[1:] if c[2] and c[2].endswith(" s)")]
+        self.assertTrue(ticks)
+        self.assertEqual(ticks[0][:2], ("Downloading package lists ...", None))      # the bar stays where it is
+        self.assertRegex(ticks[0][2], r"^Retrieving file 20 of 22 \(\d+ s\)$")
+        # apt repeats the same line: the counter stays
+        ticker = app.Ticker(lambda t, p=None, d=None: calls.append((t, p, d)), after=0)
+        ticker.stop()
+        ticker("Downloading package lists ...", 9, "Retrieving file 20 of 22")
+        ticker("Downloading package lists ...", 9, "Retrieving file 20 of 22")
+        self.assertRegex(calls[-1][2], r"^Retrieving file 20 of 22 \(\d+ s\)$")

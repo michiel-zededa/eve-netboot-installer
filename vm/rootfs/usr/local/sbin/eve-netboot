@@ -659,6 +659,147 @@ def run(cmd, check=True, quiet=False, **kw):
     return p
 
 
+def run_progress(cmd, on_line=None, on_status=None, **kw):
+    """Like run(), but reports the command's output while it runs: on_line(line)
+    for every line of its output, on_status(line) for every line it writes to
+    the extra file descriptor that {status_fd} in cmd is replaced with (apt's
+    APT::Status-Fd). Raises RuntimeError when it fails, like run()."""
+    r = w = None
+    if on_status:
+        r, w = os.pipe()
+        cmd = [c.replace("{status_fd}", str(w)) for c in cmd]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         pass_fds=(w,) if w else (), **kw)
+    reader = None
+    if w:
+        os.close(w)
+
+        def read_status():
+            with os.fdopen(r, errors="replace") as f:
+                for line in f:
+                    on_status(line.rstrip("\n"))
+        reader = threading.Thread(target=read_status, daemon=True)
+        reader.start()
+    out = []
+    with p:
+        for line in p.stdout:
+            out.append(line)
+            if on_line:
+                on_line(line.rstrip("\n"))
+    if reader:
+        reader.join(5)
+    text = "".join(out)
+    if text.strip():
+        with open(LOG, "a") as f:
+            f.write(f"$ {' '.join(cmd)}\n{text}")
+    if p.returncode != 0:
+        raise RuntimeError(f"{' '.join(cmd)} failed: {text.strip()[-300:]}")
+    return text
+
+
+APT_STATUS_RE = re.compile(r"^(dlstatus|pmstatus):(.*?):(\d+(?:\.\d+)?):(.*)$")
+
+
+def apt_status(line):
+    """A line of apt's APT::Status-Fd -> ("download" | "install", percent, text), or None.
+    dlstatus:<n>:<percent>:<message>   pmstatus:<package>:<percent>:<message>"""
+    m = APT_STATUS_RE.match(line.strip())
+    if not m:
+        return None
+    return ("download" if m.group(1) == "dlstatus" else "install"), float(m.group(3)), m.group(4).strip()
+
+
+def apt_count(simulation):
+    """The number of packages an apt-get -s (simulated) upgrade would install or remove."""
+    return sum(1 for line in simulation.splitlines() if line.startswith(("Inst ", "Remv ")))
+
+
+class PullProgress:
+    """docker pull without a terminal prints one line per layer change ("<id>: Pulling
+    fs layer", "<id>: Download complete", "<id>: Pull complete", "<id>: Already
+    exists"): -> the share of the layers that are done (a downloaded layer counts half)."""
+    LINE = re.compile(r"^([0-9a-f]{12}): (.+)$")
+
+    def __init__(self):
+        self.layers = {}
+
+    def feed(self, line):
+        m = self.LINE.match(line.strip())
+        if not m:
+            return False
+        state = m.group(2).lower()
+        done = 1.0 if ("pull complete" in state or "already exists" in state) else \
+            0.5 if ("download complete" in state or "extracting" in state or "verifying" in state) else 0.0
+        self.layers[m.group(1)] = max(self.layers.get(m.group(1), 0.0), done)
+        return True
+
+    @property
+    def total(self):
+        return len(self.layers)
+
+    @property
+    def done(self):
+        return sum(1 for v in self.layers.values() if v >= 1)
+
+    @property
+    def fraction(self):
+        return sum(self.layers.values()) / len(self.layers) if self.layers else 0.0
+
+
+def stage(start, end):
+    """A part of the progress bar: fraction 0..1 within the stage -> percent overall."""
+    return lambda fraction: start + (end - start) * min(max(fraction, 0.0), 1.0)
+
+
+class Ticker:
+    """Wraps say(stage, percent, detail): when a step takes longer than a few
+    seconds (a big download, a slow package), the detail shows for how long,
+    updated every second, so the update never looks frozen."""
+
+    def __init__(self, say, after=3):
+        self.say, self.after = say, after
+        self.stage = self.detail = None
+        self.since = time.monotonic()
+        self.lock = threading.Lock()
+        self.stopped = threading.Event()
+        threading.Thread(target=self.tick, daemon=True).start()
+
+    def __call__(self, text, percent=None, detail=None):
+        with self.lock:
+            if (text, detail) != (self.stage, self.detail):
+                self.stage, self.detail, self.since = text, detail, time.monotonic()
+            shown = self.shown()
+        # apt repeats the same status line: the step keeps its counter
+        self.say(text, percent, shown)
+
+    def shown(self):
+        seconds = int(time.monotonic() - self.since)
+        if seconds < self.after:
+            return self.detail
+        return f"{self.detail} ({seconds} s)" if self.detail else f"({seconds} s)"
+
+    def tick(self):
+        while not self.stopped.wait(1):
+            with self.lock:
+                stage, shown = self.stage, self.shown()
+            if stage and shown != self.detail:
+                self.say(stage, None, shown)
+
+    def stop(self):
+        self.stopped.set()
+
+
+def print_progress():
+    """say() for the command line: each stage once, no progress details."""
+    last = []
+
+    def say(text, percent=None, detail=None):
+        if not last or last[-1] != text:
+            last.append(text)
+            print(text, flush=True)
+    return say
+
+
 def read(path, default=""):
     try:
         with open(path, encoding="utf-8") as f:
@@ -1148,23 +1289,53 @@ def cmd_export():
     print(render_export(load_settings()), end="")
 
 
-def update_system(say=print):
-    """apt update/upgrade/autoremove; never touches packages marked manual."""
-    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+def update_system(say=None):
+    """apt update/upgrade/autoremove; never touches packages marked manual.
+    say(stage, percent, detail) reports the progress (percent of the whole update)."""
+    ticker = Ticker(say or print_progress())
+    try:
+        return _update_system(ticker)
+    finally:
+        ticker.stop()
+
+
+def _update_system(say):
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive", LC_ALL="C.UTF-8")
     opts = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
-    say(tr("adm_upd_lists"))
-    run(["apt-get", "update"], env=env)
-    say(tr("adm_upd_installing"))
-    run(["apt-get", "-y", *opts, "full-upgrade"], env=env)
-    say(tr("adm_upd_autoremove"))
+    # the parts of the bar: lists, download, install, clean up, restart, check
+    lists, download, install = stage(0, 10), stage(10, 40), stage(40, 88)
+
+    say(tr("adm_upd_lists"), 0)
+    run_progress(["apt-get", "-o", "APT::Status-Fd={status_fd}", "update"], env=env,
+                 on_line=lambda line: line.startswith(("Get:", "Hit:", "Ign:")) and say(
+                     tr("adm_upd_lists"), None, line.split(" ", 1)[-1].strip()),
+                 on_status=lambda line: (st := apt_status(line)) and say(tr("adm_upd_lists"), lists(st[1] / 100), st[2]))
+    n = apt_count(run(["apt-get", "-s", *opts, "full-upgrade"], env=env, quiet=True).stdout)
+    if n:
+        say(tr("adm_upd_downloading", n=n), download(0), tr("adm_upd_count", n=n))
+
+        def status(line):
+            st = apt_status(line)
+            if st and st[0] == "download":
+                say(tr("adm_upd_downloading", n=n), download(st[1] / 100), st[2])
+            elif st:
+                say(tr("adm_upd_installing"), install(st[1] / 100), st[2])
+        run_progress(["apt-get", "-y", "-o", "APT::Status-Fd={status_fd}", *opts, "full-upgrade"],
+                     env=env, on_status=status)
+    else:
+        say(tr("adm_upd_none"), 88)
+    say(tr("adm_upd_autoremove"), 88)
     run(["apt-get", "-y", "autoremove", "--purge"], env=env)
     run(["apt-get", "clean"], env=env)
     s = load_settings()
     if is_configured():
+        say(tr("adm_upd_restarting"), 93)
         apply_stack(s)
+        say(tr("adm_upd_checking"), 97)
         ok = healthy(s)
     else:
         ok = True
+    say(tr("adm_upd_done"), 100)
     reboot = os.path.exists("/run/reboot-required")
     msg = tr("adm_upd_done") + " " + tr("adm_upd_working" if ok else "adm_upd_unhealthy")
     if reboot:
@@ -1187,8 +1358,17 @@ def latest_release():
         return json.load(r)["tag_name"]
 
 
-def update_app(say=print):
-    """Newest release: pull image + compose.yaml, check health, roll back on failure."""
+def update_app(say=None):
+    """Newest release: pull image + compose.yaml, check health, roll back on failure.
+    say(stage, percent, detail) reports the progress (percent of the whole update)."""
+    ticker = Ticker(say or print_progress())
+    try:
+        return _update_app(ticker)
+    finally:
+        ticker.stop()
+
+
+def _update_app(say):
     s = load_settings()
     if s.get("ENI_IMAGE"):
         return False, tr("adm_app_pinned", image=s["ENI_IMAGE"])
@@ -1200,25 +1380,34 @@ def update_app(say=print):
         return False, tr("adm_app_dev", image=old_image)
     if newest is None or newest <= current:
         return True, tr("adm_app_current", version=old_image.rsplit(":", 1)[-1])
-    say(tr("adm_app_downloading", image=target))
-    run(["docker", "pull", target])
+    say(tr("adm_app_downloading", image=target), 2)
+    pull, layers = stage(2, 80), PullProgress()
+
+    def pulled(line):
+        if layers.feed(line):
+            say(tr("adm_app_downloading", image=target), pull(layers.fraction),
+                tr("adm_app_layers", done=layers.done, total=layers.total))
+    run_progress(["docker", "pull", target], on_line=pulled)
+    say(tr("adm_app_compose"), 80)
     compose_url = f"https://raw.githubusercontent.com/{REPO}/{tag}/compose.yaml"
     with urllib.request.urlopen(compose_url, timeout=30) as r:
         new_compose = r.read().decode()
     old_compose = read(os.path.join(STACK, "compose.yaml"))
     write(os.path.join(STACK, "compose.yaml"), new_compose)
     write(os.path.join(STATE, "image"), target + "\n")
-    say(tr("adm_app_restarting"))
+    say(tr("adm_app_restarting"), 84)
     try:
         apply_stack(s)
+        say(tr("adm_upd_checking"), 93)
         ok = healthy(s)
     except Exception as e:  # noqa: BLE001
         log(f"update failed: {e}")
         ok = False
     if ok:
+        say(tr("adm_app_updated", version=tag), 100)
         log(f"app updated: {old_image} -> {target}")
         return True, tr("adm_app_updated", version=tag)
-    say(tr("adm_app_rolling_back"))
+    say(tr("adm_app_rolling_back"), 95)
     write(os.path.join(STACK, "compose.yaml"), old_compose)
     write(os.path.join(STATE, "image"), old_image + "\n")
     apply_stack(s)
@@ -1309,6 +1498,47 @@ def msg(title, text, tone=None):
     # an explicit height: with 0, whiptail also ignores the width and does not wrap
     wt("--msgbox", title, text, height=min(rows(text) + 7, 22), extra=["--ok-button", tr("adm_btn_ok")], tone=tone,
        width=72)
+
+
+class Gauge:
+    """A whiptail progress bar with the stage and one line of detail; call it as
+    say(stage, percent, detail). Updates at most a few times a second."""
+
+    def __init__(self, title):
+        env = dict(os.environ, NEWT_COLORS=NEWT_COLORS, LC_ALL="C.UTF-8")
+        self.p = subprocess.Popen(["whiptail", "--backtitle", f"{PRODUCT} {version()}", "--title", f" {title} ",
+                                   # the text area keeps the height of the first text: three lines
+                                   "--gauge", " \n \n ", "10", "72", "0"], stdin=subprocess.PIPE, text=True, env=env)
+        self.percent, self.shown, self.when = 0, None, 0.0
+        self.lock = threading.Lock()      # the update and its Ticker both report
+
+    def __call__(self, text, percent=None, detail=None):
+        with self.lock:
+            self._show(text, percent, detail)
+
+    def _show(self, text, percent, detail):
+        if percent is not None:
+            self.percent = max(self.percent, min(int(percent), 100))
+        body = text + "\n\n" + cut(" ".join(str(detail or "").split()), 66)
+        now = time.monotonic()
+        if (self.percent, body) == self.shown or (now - self.when < 0.25 and self.shown and self.shown[1][:20] == body[:20]):
+            return
+        self.shown, self.when = (self.percent, body), now
+        try:
+            self.p.stdin.write(f"XXX\n{self.percent}\n{body}\nXXX\n")
+            self.p.stdin.flush()
+        except OSError:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self.p.stdin.close()
+        except OSError:
+            pass
+        self.p.wait()
 
 
 def info(title, text, tone="warn"):
@@ -2123,7 +2353,8 @@ def menu():
             elif c == "update":
                 if yesno(tr("adm_update_system"), tr("adm_update_system_q"),
                          yes=tr("adm_btn_update"), no=tr("adm_btn_cancel")):
-                    ok, reboot, text = update_system(lambda t: info(tr("adm_updating"), t))
+                    with Gauge(tr("adm_update_system")) as gauge:
+                        ok, reboot, text = update_system(gauge)
                     if reboot and yesno(tr("adm_update_system"), text + "\n\n" + tr("adm_reboot_now_q"),
                                         yes=tr("adm_btn_reboot"), no=tr("adm_btn_later"), tone="warn"):
                         run(["systemctl", "reboot"], check=False)
@@ -2132,7 +2363,8 @@ def menu():
             elif c == "app":
                 if yesno(tr("adm_update_app"), tr("adm_update_app_q", image=current_image(s)),
                          yes=tr("adm_btn_update"), no=tr("adm_btn_cancel")):
-                    ok, text = update_app(lambda t: info(tr("adm_updating"), t))
+                    with Gauge(tr("adm_update_app")) as gauge:
+                        ok, text = update_app(gauge)
                     msg(tr("adm_update_app"), text, tone="ok" if ok else "err")
             elif c == "password":
                 pw = ask_password(tr("adm_admin_password"))

@@ -85,13 +85,21 @@ class Job:
         self.messages = []
         self.result = None
         self.started = time.time()
+        self.progress = None    # {"percent", "detail"}: only for jobs that report it (updates)
 
-    def say(self, text):
-        self.messages.append(text)
+    def say(self, text, percent=None, detail=None):
+        """A stage (each one once in the messages), and optionally how far the job
+        is (percent of the whole) and what it is doing right now (detail)."""
+        if not self.messages or self.messages[-1] != text:
+            self.messages.append(text)
+        if percent is not None or detail is not None:
+            last = self.progress or {"percent": 0, "detail": ""}
+            self.progress = {"percent": round(max(last["percent"], percent or 0), 1),
+                             "detail": str(detail or "")[:200]}
 
     def as_dict(self):
         return {"id": self.id, "kind": self.kind, "state": self.state, "messages": self.messages,
-                "result": self.result}
+                "result": self.result, "progress": self.progress}
 
 
 class App:

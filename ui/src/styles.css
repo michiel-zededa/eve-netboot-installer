@@ -506,6 +506,11 @@ pre.small-log { max-height: 240px; margin-top: 16px; background: var(--surface-2
 .job { margin-top: 12px; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: 14px; display: grid; gap: 4px; }
 .job.failed { background: var(--err-bg); color: var(--err); }
 .job.running { display: flex; align-items: center; gap: 10px; }
+.job:has(.job-progress) { display: grid; gap: 4px; }
+.job-progress { margin-bottom: 8px; }
+.job-progress-head { display: flex; justify-content: space-between; gap: 12px; }
+.job-progress .progress { height: 10px; margin: 8px 0 6px; }
+.job-detail { font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preview { margin-top: 18px; }
 .table.compact th, .table.compact td { padding: 8px 10px; font-size: 13px; white-space: normal; }
 .table.compact th { padding: 8px 10px; }

@@ -49,10 +49,24 @@ export function Logs() {
 // ---------------------------------------------------------------------------
 function JobView({ job }: { job: Job | null }) {
   if (!job) return null;
+  const p = job.progress;
   return (
     <div className={`job ${job.state}`}>
-      {job.messages.map((m, i) => <div key={i}>{m}</div>)}
-      {job.state === "running" && <div className="muted">...</div>}
+      {p && job.state === "running" && (
+        <div className="job-progress">
+          <div className="job-progress-head">
+            <strong>{job.messages.at(-1)}</strong>
+            <span className="muted">{Math.round(p.percent)}%</span>
+          </div>
+          <div className="progress"><span style={{ width: `${p.percent}%` }} /></div>
+          <div className="muted small job-detail">{p.detail || "\u00a0"}</div>
+        </div>
+      )}
+      {/* the stages so far; while the bar runs, the current one is its heading */}
+      {(p && job.state === "running" ? job.messages.slice(0, -1) : job.messages).map((m, i) => (
+        <div key={i} className={p && job.state === "running" ? "muted" : undefined}>{m}</div>
+      ))}
+      {job.state === "running" && !p && <div className="muted">...</div>}
     </div>
   );
 }
@@ -65,7 +79,7 @@ export function Updates({ info }: { info: SettingsInfo | null }) {
   const run = async (name: "update-system" | "update-app") => {
     try {
       const { job: id } = await api.action(name);
-      const done = await waitJob(id!, (messages) => setJob((j) => ({ ...(j ?? { id: id!, kind: name, state: "running", result: null }), messages })));
+      const done = await waitJob(id!, (_messages, current) => setJob(current));
       setJob(done);
       const result = done.result as { ok?: boolean; message?: string; reboot?: boolean } | null;
       if (result?.message) setJob({ ...done, messages: [...done.messages, result.message] });

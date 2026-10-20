@@ -399,6 +399,16 @@ class WebTest(WebBase):
             job = self.wait_job(body["job"])
         self.assertEqual((job["state"], job["result"]["message"], job["messages"]), ("done", "Updated.", ["Downloading ..."]))
 
+        def update(say):          # the progress of an update: stages once, the bar and the detail
+            say("Downloading ...", 10, "1 of 4 image layers")
+            say("Downloading ...", 40, "2 of 4 image layers")
+            say("Restarting ...", 84)
+            return True, "Updated."
+        with mock.patch.object(core, "update_app", update):
+            job = self.wait_job(self.request("POST", "/api/actions/update-app", {})[1]["job"])
+        self.assertEqual((job["messages"], job["progress"]), (["Downloading ...", "Restarting ..."],
+                                                              {"percent": 84, "detail": ""}))
+
 
 class FakeZededa:
     """Stands in for zededa.Client: one shared fake controller per test."""

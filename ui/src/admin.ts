@@ -19,6 +19,8 @@ export interface Job {
   state: "running" | "done" | "failed";
   messages: string[];
   result: unknown;
+  // updates: how far the job is (percent of the whole) and what it is doing now
+  progress?: { percent: number; detail: string } | null;
 }
 
 export interface SettingsInfo {
@@ -150,7 +152,7 @@ export interface ZededaInfo {
 }
 
 /** Wait for a background task; onMessage gets every new progress line. */
-export async function waitJob(id: string, onMessage?: (msgs: string[]) => void): Promise<Job> {
+export async function waitJob(id: string, onMessage?: (msgs: string[], job: Job) => void): Promise<Job> {
   for (;;) {
     let job: Job;
     try {
@@ -161,7 +163,7 @@ export async function waitJob(id: string, onMessage?: (msgs: string[]) => void):
       await new Promise((r) => setTimeout(r, 2000));
       continue;
     }
-    onMessage?.(job.messages);
+    onMessage?.(job.messages, job);
     if (job.state !== "running") return job;
     await new Promise((r) => setTimeout(r, 1000));
   }

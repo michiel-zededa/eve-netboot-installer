@@ -568,6 +568,14 @@ does not matter. Deleting or replacing the file updates the menu.
 | EVE Netboot Installer | Menu → *Update EVE Netboot Installer* | Low: if the new version does not start correctly, the previous one is restored automatically |
 | A new Debian release, a new appliance version | A new VM, see [step 9](#9-replace-the-vm-with-a-newer-version) | |
 
+Both updates show a progress bar, in the console menu and on the web
+management's *Updates* page, with the current stage and what it is doing right
+now: the package lists, the number of packages and each one as it is
+downloaded and installed (*Unpacking libc6*), or the image layers of a new
+release (*3 of 7 image layers*), then the restart and the check of the services.
+A step that takes longer than a few seconds shows for how long, so a large
+download never looks frozen.
+
 Tip: take a snapshot of the VM before updating if your hypervisor supports it.
 
 ---
