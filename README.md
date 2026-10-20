@@ -264,7 +264,7 @@ Everything is configured in `.env`; [.env.example](.env.example) documents every
 
 - **`ENI_*`:** EVE Netboot Installer itself: image, language, boot menu, sync intervals, GitHub token.
 - **`EVE_*`:** EVE-OS: which releases are mirrored (`EVE_ARCHES`, `EVE_FLAVOURS`, `EVE_LTS_LINES`, `EVE_GITHUB_REPO`) and, as `EVE_DEFAULT_*`, the defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
-- **VM appliance only:** the settings of the VM itself, such as its network, its DHCP service (`DHCP_*`) and ZEDEDA onboarding (`ZEDEDA_ONBOARDING`, `ZEDEDA_CLUSTER`, `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`, `ZEDEDA_PROJECT`, `ZEDEDA_ONBOARDING_KEY`, `ZEDEDA_NODE_NAME`, `ZEDEDA_NODE_NEXT`). There is no setting for the ZEDEDA password or session: those are never stored. See [vm/README.md: all settings](vm/README.md#10-all-settings).
+- **VM appliance only:** the settings of the VM itself, such as its network, its DHCP service (`DHCP_*`) and ZEDEDA onboarding (`ZEDEDA_ONBOARDING`, `ZEDEDA_CLUSTER`, `ZEDEDA_LOGIN`, `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`, `ZEDEDA_PROJECT`, `ZEDEDA_ONBOARDING_KEY`, `ZEDEDA_NODE_NAME`, `ZEDEDA_NODE_NEXT`). There is no setting for the ZEDEDA password or session: those are never stored. See [vm/README.md: all settings](vm/README.md#10-all-settings).
 - **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, `EVE_MENU_MODE`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
 
 The most important ones:

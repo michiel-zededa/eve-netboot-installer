@@ -433,8 +433,9 @@ for which you have to know which soft serial ended up on which machine. Here:
      without a model in a project with one), for example `onboarding`.
 2. In the web management or the console menu, *ZEDEDA onboarding*: switch it
    on and fill in the API address of your cluster (`zedcontrol.zededa.net` by
-   default) and the project; the user and the enterprise only to log in with
-   a password. When the role may not
+   default) and the project. *Log in with* is **API token** by default: nothing
+   else is needed. Choose **User and password** to log in with a password; the
+   user and the enterprise then appear and are needed. When the role may not
    read projects, enter the project's ID instead of its name. The onboarding
    key is filled in with the default of the EVE-OS images from GitHub.
 3. Choose the **naming convention** of the nodes (*Node name*). A node cannot
@@ -466,7 +467,9 @@ for which you have to know which soft serial ended up on which machine. Here:
 
 1. *ZEDEDA onboarding* → log in to ZEDEDA, in the web management or in the
    console menu: paste the **API token** (*Log in with an API token* in the
-   console), or type the **password** of the user set in the settings. A
+   console), or type the **password** of the user set in the settings. After
+   a token login the appliance shows the account the token belongs to (and
+   its enterprise, when the role may read it). A
    password is used for this login only; the token or session is kept **in
    the VM's memory only**, never on disk or in an export, and is gone when
    the VM or the web management restarts. A password session lasts 4 hours;

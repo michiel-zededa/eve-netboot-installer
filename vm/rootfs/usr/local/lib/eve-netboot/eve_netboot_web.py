@@ -723,6 +723,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "cluster": c.get(s, "ZEDEDA_CLUSTER"),
             "enterprise": c.get(s, "ZEDEDA_ENTERPRISE"),
             "user": c.get(s, "ZEDEDA_USER"),
+            "login": c.get(s, "ZEDEDA_LOGIN"),
             "project": c.get(s, "ZEDEDA_PROJECT"),
             "session": None if not z else {
                 "user": z["user"], "enterprise": z["enterprise"], "cluster": z["cluster"], "via": z["via"],
@@ -746,8 +747,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if pasted:
                 client = zededa.Client(cluster, token=pasted)
                 info = client.check()
-                session = {"token": pasted, "expires": info["expires"], "user": info["user"] or c.tr("adm_zo_token_user"),
+                # the token's own account and enterprise (not the settings': those are for a password)
+                session = {"token": pasted, "expires": info["expires"], "user": info["user"],
                            "via": "token"}
+                enterprise = info.get("enterprise", "")
             else:
                 if not (enterprise and user and password):
                     raise HttpError(400, c.tr("adm_zo_need_login"))
@@ -770,10 +773,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 warning = c.tr("adm_zo_project_unknown", project=project, error=str(e))
         if proj.get("appPolicy") or proj.get("deployment"):
             warning = c.tr("adm_zo_policy_warning", project=project)
-        session.update({"enterprise": enterprise or "-", "cluster": cluster, "since": time.time(),
+        session.update({"enterprise": enterprise, "cluster": cluster, "since": time.time(),
                         "project_id": proj.get("id", "")})
         self.app.zededa = session
-        c.log(f"web: logged in to ZEDEDA {cluster} as {session['user']} ({session['via']})")
+        c.log(f"web: logged in to ZEDEDA {cluster} as {session['user'] or '?'} ({session['via']})")
         self.send(200, {"ok": True, "warning": warning, **self.zededa_info()})
 
     def zededa_logout(self):

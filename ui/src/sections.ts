@@ -131,11 +131,14 @@ export const SECTIONS: Section[] = [
     id: "zededa",
     fields: (_info, t) => {
       const on = yes("ZEDEDA_ONBOARDING");
+      // user and enterprise only for a login with a password; an API token needs neither
+      const withPassword = (v: Values) => on(v) && v.ZEDEDA_LOGIN === "password";
       return [
         field(t, "ZEDEDA_ONBOARDING", "yesno"),
         field(t, "ZEDEDA_CLUSTER", "text", { showIf: on, placeholder: "zedcontrol.zededa.net" }),
-        field(t, "ZEDEDA_ENTERPRISE", "text", { showIf: on }),
-        field(t, "ZEDEDA_USER", "text", { showIf: on }),
+        field(t, "ZEDEDA_LOGIN", "select", { showIf: on, values: ["token", "password"] }),
+        field(t, "ZEDEDA_ENTERPRISE", "text", { showIf: withPassword }),
+        field(t, "ZEDEDA_USER", "text", { showIf: withPassword }),
         field(t, "ZEDEDA_PROJECT", "text", { showIf: on }),
         field(t, "ZEDEDA_ONBOARDING_KEY", "text", { showIf: on }),
         field(t, "ZEDEDA_NODE_NAME", "text", { showIf: on, placeholder: "eve-{mac}" }),

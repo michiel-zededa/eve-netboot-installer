@@ -112,6 +112,7 @@ export interface ZededaInfo {
   cluster: string;
   enterprise: string;
   user: string;
+  login: "token" | "password";
   project: string;
   session: null | {
     user: string;

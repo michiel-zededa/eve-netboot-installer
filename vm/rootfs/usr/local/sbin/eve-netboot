@@ -91,8 +91,8 @@ VM_KEYS = {"HOSTNAME", "NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY"
            "SMB_IMPORT_SHARE", "SMB_PASSWORD", "WEB_ADMIN", "WEB_ADMIN_PORT",
            "DHCP_MODE", "DHCP_INTERFACE", "DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS",
            "DHCP_LEASE_TIME",
-           "ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT",
-           "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"}
+           "ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER",
+           "ZEDEDA_PROJECT", "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"}
 # applied once and never stored
 CONSUMED = {"ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "SMB_PASSWORD"}
 # not in an export (secrets)
@@ -116,6 +116,7 @@ DEFAULTS = {
     # session with the controller lives in the web management's memory only
     "ZEDEDA_ONBOARDING": "no",
     "ZEDEDA_CLUSTER": "zedcontrol.zededa.net",
+    "ZEDEDA_LOGIN": "token",
     "ZEDEDA_ONBOARDING_KEY": "5d0767ee-0547-4569-b530-387e526f8cb9",
     "ZEDEDA_NODE_NAME": "eve-{mac}",
     "ZEDEDA_NODE_NEXT": "1",
@@ -371,8 +372,11 @@ def zededa_problems(s):
     if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+",
                         get(s, "ZEDEDA_CLUSTER")):
         errors.append(("ZEDEDA_CLUSTER", tr("adm_err_zededa_cluster")))
+    login = get(s, "ZEDEDA_LOGIN")
+    if login not in ("token", "password"):
+        errors.append(("ZEDEDA_LOGIN", tr("adm_err_zededa_login")))
     # user and enterprise only for a login with a password (an API token needs neither)
-    for k in ("ZEDEDA_PROJECT",):
+    for k in ("ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT") if login == "password" else ("ZEDEDA_PROJECT",):
         if not get(s, k).strip():
             errors.append((k, tr("adm_err_zededa_empty", setting=label(k))))
     if not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
@@ -1394,7 +1398,8 @@ FIELDS = {
     "DHCP_MODE": ("choice", list(DHCP_MODES)), "DHCP_INTERFACE": ("dhcpadapter", None),
     "DHCP_RANGE_START": ("text", None), "DHCP_RANGE_END": ("text", None), "DHCP_GATEWAY": ("text", None),
     "DHCP_DNS": ("text", None), "DHCP_LEASE_TIME": ("text", None),
-    "ZEDEDA_ONBOARDING": ("yesno", None), "ZEDEDA_CLUSTER": ("text", None), "ZEDEDA_ENTERPRISE": ("text", None),
+    "ZEDEDA_ONBOARDING": ("yesno", None), "ZEDEDA_CLUSTER": ("text", None),
+    "ZEDEDA_LOGIN": ("choice", ["token", "password"]), "ZEDEDA_ENTERPRISE": ("text", None),
     "ZEDEDA_USER": ("text", None), "ZEDEDA_PROJECT": ("text", None), "ZEDEDA_ONBOARDING_KEY": ("text", None),
     "ZEDEDA_NODE_NAME": ("text", None), "ZEDEDA_NODE_NEXT": ("text", None),
 }
@@ -1411,7 +1416,8 @@ SECTIONS = {
                  "EVE_DEFAULT_PERSIST_DISK", "EVE_DEFAULT_REBOOT", "EVE_DEFAULT_SOFT_SERIAL",
                  "EVE_DEFAULT_NUKE_ALL_DISKS", "EVE_DEFAULT_EXTRA_ARGS"],
     "share": ["SMB_IMPORT_SHARE", "SMB_PASSWORD"],
-    "zededa": ["ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT",
+    "zededa": ["ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER",
+               "ZEDEDA_PROJECT",
                "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"],
     "access": ["WEB_ADMIN", "WEB_ADMIN_PORT", "SSH_PASSWORD_LOGIN", "ADMIN_SSH_KEYS", "TZ"],
 }
@@ -1425,8 +1431,9 @@ SHOWN_IF = {
     **{k: (lambda s: get(s, "DHCP_MODE") == "server")
        for k in ("DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS", "DHCP_LEASE_TIME")},
     **{k: (lambda s: get(s, "ZEDEDA_ONBOARDING") == "yes")
-       for k in ("ZEDEDA_CLUSTER", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT",
-                 "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME")},
+       for k in ("ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_PROJECT", "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME")},
+    **{k: (lambda s: get(s, "ZEDEDA_ONBOARDING") == "yes" and get(s, "ZEDEDA_LOGIN") == "password")
+       for k in ("ZEDEDA_ENTERPRISE", "ZEDEDA_USER")},
     "ZEDEDA_NODE_NEXT": lambda s: (get(s, "ZEDEDA_ONBOARDING") == "yes" and
                                    re.search(r"\{n(:\d)?\}", get(s, "ZEDEDA_NODE_NAME")) is not None),
 }
@@ -1608,7 +1615,7 @@ def screen_zededa(s):
         elif status != 200:
             state = info.get("error") or tr("adm_zo_web_down")
         elif session and session.get("via") == "token":
-            state = tr("adm_zo_logged_in") + " " + tr("adm_zo_session_token_text", cluster=session["cluster"])
+            state = tr("adm_zo_logged_in") + " " + token_session_text(session)
         elif session:
             state = tr("adm_zo_logged_in") + " " + tr(
                 "adm_zo_session_text", user=session["user"], enterprise=session["enterprise"],
@@ -1624,10 +1631,12 @@ def screen_zededa(s):
             if session:
                 items.append(("logout", tr("adm_zo_logout")))
             else:
-                # a password needs the user and enterprise; an API token needs nothing else
-                if get(cur, "ZEDEDA_USER") and get(cur, "ZEDEDA_ENTERPRISE"):
+                # the login method of the settings: an API token needs nothing else,
+                # a password the user and enterprise
+                if get(cur, "ZEDEDA_LOGIN") == "password":
                     items.append(("login", tr("adm_zo_login")))
-                items.append(("token", tr("adm_zo_login_token")))
+                else:
+                    items.append(("token", tr("adm_zo_login_token")))
         if nodes:
             items += [("nodes", f"{tr('adm_zo_onboarded')} ({len(nodes)})"), ("export", tr("adm_zo_export"))]
         try:
@@ -1672,9 +1681,20 @@ def screen_zededa(s):
             continue
 
 
+def token_session_text(session):
+    """"with an API token of <user> in <enterprise>": as far as ZEDEDA told who the token belongs to."""
+    key = ("adm_zo_session_token_text" if session.get("user") and session.get("enterprise") else
+           "adm_zo_session_token_user" if session.get("user") else "adm_zo_session_token_anon")
+    return tr(key, user=session.get("user", ""), enterprise=session.get("enterprise", ""), cluster=session["cluster"])
+
+
 def zededa_login_result(title, code, answer):
     if code == 200:
-        msg(title, answer.get("warning") or tr("adm_zo_logged_in"), tone="warn" if answer.get("warning") else "ok")
+        session = answer.get("session") or {}
+        text = tr("adm_zo_logged_in") + (" " + token_session_text(session) if session.get("via") == "token" else "")
+        if answer.get("warning"):
+            text += "\n\n" + answer["warning"]
+        msg(title, text, tone="warn" if answer.get("warning") else "ok")
     else:
         msg(title, answer.get("error", str(answer)) if isinstance(answer, dict) else str(answer), tone="err")
 

@@ -87,8 +87,9 @@ export default function ZededaSession() {
   const s = info.session;
   const nodes = info.onboarded.filter((n) => n.result === "created" || n.result === "exists");
   const online = nodes.filter((n) => n.status?.state === "online").length;
-  // a password needs the user and enterprise from the settings; an API token needs nothing else
-  const withPassword = Boolean(info.user && info.enterprise);
+  // the login method of the settings: an API token needs nothing else, a password the
+  // user and enterprise from the settings
+  const withPassword = info.login === "password";
 
   return (
     <>
@@ -101,7 +102,9 @@ export default function ZededaSession() {
               <p>
                 <span className="pill ok">{t("adm_zo_logged_in")}</span>{" "}
                 {s.via === "token"
-                  ? t("adm_zo_session_token_text", { cluster: s.cluster })
+                  ? t(s.user && s.enterprise ? "adm_zo_session_token_text"
+                      : s.user ? "adm_zo_session_token_user" : "adm_zo_session_token_anon",
+                      { user: s.user, enterprise: s.enterprise, cluster: s.cluster })
                   : t("adm_zo_session_text", { user: s.user, enterprise: s.enterprise, cluster: s.cluster,
                                                until: time(s.expires) })}
               </p>
@@ -113,30 +116,31 @@ export default function ZededaSession() {
           <>
             <p><span className="pill warn">{t("adm_zo_not_logged_in_ui")}</span></p>
             {withPassword ? (
-              <p className="muted small">{t("adm_zo_login_text", { user: info.user, enterprise: info.enterprise,
+              <p className="muted small">{t("adm_zo_login_text", { user: info.user || "-", enterprise: info.enterprise || "-",
                                                                     cluster: info.cluster })}</p>
             ) : (
               <p className="muted small">{t("adm_zo_login_token_text", { cluster: info.cluster })}</p>
             )}
             <div className="fields">
-              <label className="field">
-                <span className="field-label">{t("adm_zo_token")}</span>
-                <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && token) login({ token }); }} />
-                <span className="field-help">{t("adm_zo_token_help")}</span>
-              </label>
-              {withPassword && (
+              {withPassword ? (
                 <label className="field">
                   <span className="field-label">{t("adm_zo_password")}</span>
                   <input type="password" autoComplete="off" value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && password) login({ password }); }} />
                 </label>
+              ) : (
+                <label className="field">
+                  <span className="field-label">{t("adm_zo_token")}</span>
+                  <input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && token) login({ token }); }} />
+                  <span className="field-help">{t("adm_zo_token_help")}</span>
+                </label>
               )}
             </div>
             <div className="form-actions">
-              <button className="btn primary" disabled={busy || (!password && !token)}
-                onClick={() => login(token ? { token } : { password })}>
+              <button className="btn primary" disabled={busy || (withPassword ? !password : !token)}
+                onClick={() => login(withPassword ? { password } : { token })}>
                 <LogIn size={16} /> {t("adm_zo_login")}
               </button>
             </div>

@@ -417,7 +417,7 @@ class FakeZededa:
         return {"token": "SECRET-TOKEN", "expires": web.time.time() + 4 * 3600, "role": "SysManager"}
 
     def check(self):
-        return {"user": "sso-user", "expires": None}
+        return {"user": "sso-user", "enterprise": "ACME", "expires": None}
 
     def logout(self):
         pass
@@ -514,7 +514,7 @@ class ZededaWebTest(WebBase):
 
         class Anonymous(FakeZededa):
             def check(self):
-                return {"user": "", "expires": None}
+                return {"user": "", "enterprise": "", "expires": None}
 
         with mock.patch.object(web.zededa, "Client", Anonymous):
             self.start_tls()
@@ -523,7 +523,7 @@ class ZededaWebTest(WebBase):
             self.assertEqual(status, 400)                      # a password needs user and enterprise
             status, body, _ = self.request("POST", "/api/zededa/login", {"token": "SECRET-TOKEN"})
             self.assertEqual((status, body["session"]["user"], body["session"]["enterprise"]),
-                             (200, "API token", "-"))
+                             (200, "", ""))
             self.assertEqual(self.onboard()["eve_ob_ok"], "1")
         self.assertEqual(FakeZededa.created[0][2], self.MAC)
 

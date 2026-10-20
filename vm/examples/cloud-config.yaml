@@ -72,6 +72,7 @@ eve_netboot:
   # ZEDEDA in the web management (memory only); see eve-netboot.env
   ZEDEDA_ONBOARDING: "no"
   # ZEDEDA_CLUSTER: zedcontrol.zededa.net
+  # ZEDEDA_LOGIN: token                 # or password: with enterprise and user
   # ZEDEDA_ENTERPRISE: my-enterprise
   # ZEDEDA_USER: eve-netboot-onboarding
   # ZEDEDA_PROJECT: netboot

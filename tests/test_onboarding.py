@@ -82,14 +82,23 @@ class ClientTest(unittest.TestCase):
         self.assertEqual((e.exception.status, str(e.exception)), (400, "Invalid Model"))
 
     def test_token_check(self):
-        api = FakeApi({("GET", "/v1/sessions/self"): (200, {"username": "u@example.net",
-                                                             "token": {"expires": "1792003034371309674"}})})
+        # the account is in "user" (a DetailedUser), the enterprise's name in enterprises/self
+        api = FakeApi({("GET", "/v1/sessions/self"): (200, {"cause": "OK", "user": {
+                           "id": "u1", "username": "onboard@example.net", "fullName": "Onboarding",
+                           "enterpriseId": "e1"}}),
+                       ("GET", "/v1/enterprises/self"): (200, {"result": {"id": "e1", "name": "ACME"}})})
         info = zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
-        self.assertEqual((info["user"], int(info["expires"])), ("u@example.net", 1792003034))
+        self.assertEqual((info["user"], info["enterprise"]), ("Onboarding (onboard@example.net)", "ACME"))
+        # a role that may not read its enterprise: the account only
+        api = FakeApi({("GET", "/v1/sessions/self"): (200, {"user": {"username": "u@example.net"},
+                                                             "token": {"expires": "1792003034371309674"}}),
+                       ("GET", "/v1/enterprises/self"): (403, {"error": [{"details": "forbidden"}]})})
+        info = zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
+        self.assertEqual((info["user"], info["enterprise"], int(info["expires"])), ("u@example.net", "", 1792003034))
         # an API token that may not read its session: accepted, without details
         api = FakeApi({("GET", "/v1/sessions/self"): (403, {"error": [{"details": "forbidden"}]})})
         self.assertEqual(zededa.Client("zedcontrol.example.net", token="T", opener=api).check(),
-                         {"user": "", "expires": None})
+                         {"user": "", "enterprise": "", "expires": None})
         api = FakeApi({("GET", "/v1/sessions/self"): (401, {"cause": "UNAUTHENTICATED"})})
         with self.assertRaises(zededa.ZededaError):
             zededa.Client("zedcontrol.example.net", token="T", opener=api).check()
@@ -221,6 +230,21 @@ class SettingsTest(unittest.TestCase):
     def test_user_and_enterprise_only_for_a_password(self):
         # an API token needs neither: they are not required settings
         self.assertEqual(app.zededa_problems({"ZEDEDA_ONBOARDING": "yes", "ZEDEDA_PROJECT": "onboarding"}), [])
+        # ... and the login method chooses: a password needs both
+        pw = {"ZEDEDA_ONBOARDING": "yes", "ZEDEDA_PROJECT": "onboarding", "ZEDEDA_LOGIN": "password"}
+        self.assertEqual(sorted(k for k, _ in app.zededa_problems(pw)), ["ZEDEDA_ENTERPRISE", "ZEDEDA_USER"])
+        self.assertEqual(app.zededa_problems({**pw, "ZEDEDA_ENTERPRISE": "E", "ZEDEDA_USER": "u"}), [])
+        self.assertEqual([k for k, _ in app.zededa_problems({**pw, "ZEDEDA_LOGIN": "sso"})], ["ZEDEDA_LOGIN"])
+        # the console and the web show user and enterprise only for a password
+        self.assertFalse(app.SHOWN_IF["ZEDEDA_USER"]({"ZEDEDA_ONBOARDING": "yes"}))
+        self.assertTrue(app.SHOWN_IF["ZEDEDA_USER"](pw))
+
+    def test_token_session_text(self):
+        s = {"cluster": "zedcontrol.example.net"}
+        self.assertIn("u@example.net in ACME", app.token_session_text({**s, "user": "u@example.net", "enterprise": "ACME"}))
+        self.assertIn("u@example.net (zedcontrol", app.token_session_text({**s, "user": "u@example.net", "enterprise": ""}))
+        self.assertEqual(app.token_session_text({**s, "user": "", "enterprise": ""}),
+                         app.tr("adm_zo_session_token_anon", cluster=s["cluster"]))
 
     def test_naming_convention(self):
         ok = {"ZEDEDA_ONBOARDING": "yes", "ZEDEDA_ENTERPRISE": "E", "ZEDEDA_USER": "u", "ZEDEDA_PROJECT": "p"}

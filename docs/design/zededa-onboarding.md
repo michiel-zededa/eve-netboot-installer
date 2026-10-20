@@ -78,7 +78,8 @@ the behaviour of the API:
 | Call | Use | Notes |
 |---|---|---|
 | `POST /api/v1/login` | log in | `usernameAtRealm` / `username`, `password`, `enterpriseName` → `token: {base64, expires}`; `expires` in nanoseconds since 1970, a session lasts 4 hours. A wrong password answers 401 `CREDENTIAL_MISMATCH`, also with `noOfLoginAttemptsLeft: 0`, while the next correct login still works: the answer is shown as it is, never read as "locked". |
-| `GET /api/v1/sessions/self` | check a pasted token | |
+| `GET /api/v1/sessions/self` | check a pasted token | `user: {username, fullName, email, enterpriseId, …}`: the account shown with the session |
+| `GET /api/v1/enterprises/self` | the token's enterprise | `{result: {name, …}}`; optional, a role may not read it |
 | `POST /api/v1/logout` | log out | |
 | `GET /api/v1/projects/name/{name}` | project ID and policies | not called when the project is given by its ID |
 | `GET /api/v1/devices/serial/{serialno}` | duplicate check | 404 = no such node |
@@ -109,8 +110,9 @@ sequenceDiagram
 
 1. **Settings** (`ZEDEDA_*`, VM settings, part of exports; none of them
    secret): `ZEDEDA_ONBOARDING` (off by default), `ZEDEDA_CLUSTER`
-   (`zedcontrol.zededa.net`), `ZEDEDA_ENTERPRISE` and `ZEDEDA_USER` (only for
-   a login with a password),
+   (`zedcontrol.zededa.net`), `ZEDEDA_LOGIN` (`token`, the default, or
+   `password`), `ZEDEDA_ENTERPRISE` and `ZEDEDA_USER` (only shown and needed
+   with `password`),
    `ZEDEDA_PROJECT` (name or ID), `ZEDEDA_ONBOARDING_KEY` (the default key),
    `ZEDEDA_NODE_NAME` (the naming convention, `eve-{mac}`) and
    `ZEDEDA_NODE_NEXT` (the next sequence number, `1`). The same group in the
@@ -130,7 +132,9 @@ sequenceDiagram
 3. **Login, in memory only.** With a pasted **API token** (or session token)
    nothing else is needed; it is checked with `GET sessions/self`, where only
    401 rejects it (an API token that may not read its session is taken as
-   it is). With a **password**, the user and enterprise from the settings
+   it is). Its account is that answer's `user` (`username`, `fullName`); the
+   enterprise's name comes from `GET enterprises/self` when the role may read
+   it. Both are shown with the session. With a **password**, the user and enterprise from the settings
    log in through `POST /api/v1/login` (local users only; single sign-on
    users use a token); the password is used for that request only. The
    token is kept in the memory of the `eve-netboot web` process: never on
