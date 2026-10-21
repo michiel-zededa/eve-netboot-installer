@@ -497,7 +497,10 @@ In the summary of an EVE-OS 17+ image:
 
 **The machine list** plans the name and project of each machine before it is
 installed, for example from a delivery list: *ZEDEDA onboarding* → *Machine
-list*. Download the **template**, fill it in (a spreadsheet can save it as
+list*.
+
+![The machine list in the web management](../docs/images/web-machines.png)
+ Download the **template**, fill it in (a spreadsheet can save it as
 CSV, comma or semicolon separated) and upload it; an upload replaces the
 current list.
 
@@ -755,7 +758,7 @@ cloud image, on every version tag ([image.yml](../.github/workflows/image.yml)).
 To build one locally (Linux with KVM, or macOS for the native architecture):
 
 ```bash
-vm/build/build.sh --arch amd64 --version 1.7.3
+vm/build/build.sh --arch amd64 --version 1.8.0
 ```
 
 | Path | Contents |

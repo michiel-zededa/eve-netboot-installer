@@ -55,6 +55,8 @@ All taken in a documentation network (`192.0.2.0/24`).
 | **VM appliance console:** status with tabs, coloured states, the keys and a clock. | **Web management** of the VM: the same settings as its console menu. |
 | ![ZEDEDA onboarding in the web management](docs/images/web-zededa.png) | ![Summary of an EVE-OS 17 image with ZEDEDA onboarding](docs/images/ipxe-onboard.png) |
 | **ZEDEDA onboarding:** the machines of a staging bench, their nodes and whether they came online. | **Onboarding in the boot menu:** the node's name from the naming convention, before **`i`**. |
+| ![The machine list](docs/images/web-machines.png) | ![ZEDEDA onboarding in the console](docs/images/console-zededa.png) |
+| **Machine list:** name and project planned per MAC address or hardware serial, and which machines are installed. | **ZEDEDA onboarding in the console:** the same login, lists and actions as the web management. |
 
 ---
 
@@ -169,6 +171,23 @@ sequenceDiagram
 5. The web management and the console list which MAC address, hardware
    serial and product became which node; the list can be exported as CSV,
    and a node created by mistake can be deleted again.
+
+**The machine list** plans the name and project of each machine before it is
+installed, for example from a delivery list. Download the template in the web
+management (or the console), fill it in with a spreadsheet and upload it as
+CSV:
+
+```csv
+mac,hardware_serial,name,project
+52-54-00-12-34-56,,bench1-node-001,
+,CZ2345678X,store-0042-edge,stores-europe
+```
+
+A machine is found by its MAC address or by its hardware serial (read from the
+BIOS when it boots). An empty name means the naming convention, an empty
+project the onboarding project of the settings; a name typed in the boot menu
+still wins. Details:
+[vm/README.md: the machine list](vm/README.md#onboard-installed-machines-in-zededa).
 
 The summary of an EVE-OS 17+ image shows the node name and the options
 **Onboard in ZEDEDA [o]** (on by default) and **Node name [n]** next to
