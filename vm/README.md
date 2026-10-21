@@ -512,9 +512,15 @@ mac,hardware_serial,name,project
 - One row per machine, found by its **MAC address** or by its **hardware
   serial** (the serial on the label, which the boot menu reads from the
   BIOS). Either is enough; the MAC address is checked first.
-- **name** empty: the naming convention. **project** empty: the onboarding
-  project of the settings. A project by name needs a role that may read
-  projects; otherwise give its ID.
+- **name** and **project** may be left empty; the machine is then treated
+  like one that is not on the list:
+  - **name** empty: the node is named by the naming convention (*Node name*,
+    `eve-{mac}` by default; with `{n}` it takes the next number).
+  - **project** empty: the node goes into the onboarding project of the
+    settings (*Project*), like the first and last row of the example. The web
+    management shows that project greyed out in the list.
+- A project by name needs a role that may read projects; otherwise give its
+  ID.
 - The order for a machine's name: a name typed in the boot menu (**n**), the
   list, the naming convention. The summary shows the result before you press
   **i**.
