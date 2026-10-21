@@ -66,6 +66,7 @@ LOCK = "/run/eve-netboot.lock"
 # the key with which the console may use the web management's ZEDEDA session
 # (/run: memory only, root only, a new one at every start of the web management)
 ONBOARDED = os.path.join(ETC, "zededa-onboarded.json")
+MACHINES = os.path.join(ETC, "zededa-machines.json")     # the machine list (names, projects)
 WEB_LOCAL_KEY = "/run/eve-netboot-web.key"
 BOOT_DONE = "/run/eve-netboot.boot-done"   # written when "eve-netboot boot" has finished
 USERDATA = "/var/lib/cloud/instance/user-data.txt"
@@ -1893,6 +1894,7 @@ def screen_zededa(s):
             items += [("nodes", f"{tr('adm_zo_onboarded')} ({len(nodes)})"), ("export", tr("adm_zo_export"))]
         if on and status == 200:
             items.append(("import", tr("adm_zo_import_csv")))
+            items.append(("machines", f"{tr('adm_ml_title')} ({len(info.get('machines', []))})"))
         try:
             c = choose(title, tr("adm_sec_zededa_text") + "\n\n" + state, items,
                        cancel=tr("adm_btn_done"), ok=tr("adm_btn_open"))
@@ -1921,18 +1923,11 @@ def screen_zededa(s):
                 screen_zededa_nodes(title, nodes, session is not None)
             elif c == "import":
                 zededa_import_list(title)
+            elif c == "machines":
+                screen_machines(title, info.get("machines", []), info.get("project", ""))
             elif c == "export":
-                code, text = web_api("GET", "/api/zededa/export")
-                if code != 200:
-                    msg(title, text.get("error", "") if isinstance(text, dict) else str(text), tone="err")
-                    continue
-                name = f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv"
-                copies = [f"/home/{ADMIN}/{name}", os.path.join(IMPORT, name)]
-                for path in copies:
-                    write(path, text)
-                    shutil.chown(path, ADMIN, ADMIN)
-                msg(title, tr("adm_zo_exported", home=copies[0],
-                              share=f"\\\\{primary_ip() or 'VM'}\\eve-import\\{name}"), tone="ok")
+                save_csv(title, "/api/zededa/export", f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv",
+                         "adm_zo_exported")
         except Cancel:
             continue
 
@@ -1992,22 +1987,68 @@ def zededa_act(title, action, chosen):
         (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if code == 200 else "err")
 
 
-def zededa_import_list(title):
-    """Add the machines of a list exported (CSV) on another VM, from the import
-    folder (SMB share) or the admin's home folder."""
-    places = [IMPORT, f"/home/{ADMIN}"]
+def save_csv(title, api_path, name, done_key):
+    """A CSV from the web management, saved in the admin's home folder and on the import share."""
+    code, text = web_api("GET", api_path)
+    if code != 200:
+        return msg(title, text.get("error", "") if isinstance(text, dict) else str(text), tone="err")
+    copies = [f"/home/{ADMIN}/{name}", os.path.join(IMPORT, name)]
+    for path in copies:
+        write(path, text)
+        shutil.chown(path, ADMIN, ADMIN)
+    msg(title, tr(done_key, home=copies[0], share=f"\\\\{primary_ip() or 'VM'}\\eve-import\\{name}"), tone="ok")
+
+
+def pick_csv(title, text):
+    """A CSV file from the import folder (SMB share) or the admin's home folder."""
     files = []
-    for d in places:
+    for d in (IMPORT, f"/home/{ADMIN}"):
         try:
             files += [os.path.join(d, n) for n in sorted(os.listdir(d))
                       if n.lower().endswith(".csv") and not n.startswith(".")]
         except OSError:
             pass
     if not files:
-        return msg(title, tr("adm_zo_import_none", share=f"\\\\{primary_ip() or 'VM'}\\eve-import",
-                             home=f"/home/{ADMIN}"), tone="warn")
-    path = choose(title, tr("adm_zo_import_help") + "\n\n" + tr("adm_zo_import_pick"),
-                  [(f, f) for f in files[-14:]], cancel=tr("adm_btn_cancel"))
+        msg(title, tr("adm_zo_import_none", share=f"\\\\{primary_ip() or 'VM'}\\eve-import",
+                      home=f"/home/{ADMIN}"), tone="warn")
+        raise Cancel
+    return choose(title, text, [(f, f) for f in files[-14:]], cancel=tr("adm_btn_cancel"))
+
+
+def screen_machines(title, machines, project):
+    """The machine list: names and projects planned per machine (MAC address or
+    hardware serial). Upload (replaces it), save the template or the list, clear."""
+    title = f"{title}: {tr('adm_ml_title')}"
+    rows = "\n".join(f"{cut(m['name'] or '-', 22):<22} {cut(m['mac'] or m['hardware_serial'], 20):<20} "
+                     f"{cut(m['project'] or project, 18):<18} "
+                     f"{tr('adm_ml_not_yet') if not m.get('node') else m['node']['name']}" for m in machines[:12])
+    more = len(machines) - 12
+    text = tr("adm_ml_text") + "\n\n" + (rows + (f"\n{tr('adm_ml_more', n=more)}" if more > 0 else "")
+                                         if machines else tr("adm_ml_none"))
+    items = [("upload", tr("adm_ml_upload")), ("template", tr("adm_ml_template"))]
+    if machines:
+        items += [("download", tr("adm_ml_download")), ("clear", tr("adm_ml_clear"))]
+    c = choose(title, text, items, cancel=tr("adm_btn_back"), ok=tr("adm_btn_open"))
+    if c == "upload":
+        path = pick_csv(title, tr("adm_ml_pick"))
+        code, answer = web_api("POST", "/api/zededa/machines", {"text": read(path)[:1 << 20]})
+        msg(title, tr("adm_ml_uploaded", n=answer.get("count", 0)) if code == 200 else
+            (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if code == 200 else "err")
+    elif c == "template":
+        save_csv(title, "/api/zededa/machines-template.csv", "zededa-machines-template.csv", "adm_ml_saved")
+    elif c == "download":
+        save_csv(title, "/api/zededa/machines.csv", f"zededa-machines-{datetime.datetime.now():%Y%m%d-%H%M}.csv",
+                 "adm_ml_saved")
+    elif c == "clear" and yesno(title, tr("adm_ml_clear_q", n=len(machines)), yes=tr("adm_ml_clear"),
+                                no=tr("adm_btn_cancel"), default_no=True):
+        web_api("POST", "/api/zededa/machines", {"clear": True})
+        msg(title, tr("adm_ml_cleared"), tone="ok")
+
+
+def zededa_import_list(title):
+    """Add the machines of a list exported (CSV) on another VM, from the import
+    folder (SMB share) or the admin's home folder."""
+    path = pick_csv(title, tr("adm_zo_import_help") + "\n\n" + tr("adm_zo_import_pick"))
     code, answer = web_api("POST", "/api/zededa/import", {"text": read(path)[:1 << 20]})
     msg(title, tr("adm_zo_imported", n=answer.get("imported", 0), skipped=answer.get("skipped", 0)) if code == 200
         else (answer.get("error", "") if isinstance(answer, dict) else str(answer)), tone="ok" if code == 200 else "err")

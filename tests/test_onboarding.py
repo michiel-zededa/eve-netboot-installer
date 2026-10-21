@@ -343,3 +343,35 @@ class ConsoleNodesTest(unittest.TestCase):
                 app.screen_zededa_nodes("T", self.NODES, False)
         self.assertEqual([tag for tag, _ in choose.call_args_list[1].args[2]], ["forget"])
         web_api.assert_not_called()
+
+
+class ConsoleMachineListTest(unittest.TestCase):
+    """The console's machine list: the same actions as the web UI."""
+    MACHINES = [{"mac": "52-54-00-00-00-01", "hardware_serial": "", "name": "bench-001", "project": "",
+                 "node": {"name": "bench-001", "mac": "52-54-00-00-00-01", "result": "created", "state": "online"}},
+                {"mac": "", "hardware_serial": "CZ1", "name": "store-1", "project": "stores", "node": None}]
+
+    def test_upload_and_clear(self):
+        folder = tempfile.mkdtemp()
+        with open(os.path.join(folder, "list.csv"), "w") as f:
+            f.write("mac,name\n52-54-00-00-00-01,a\n")
+        calls = []
+
+        def web_api(method, path, body=None):
+            calls.append((method, path, body))
+            return 200, {"count": 1}
+
+        with mock.patch.object(app, "IMPORT", folder), mock.patch.object(app, "ADMIN", "nobody-here"), \
+                mock.patch.object(app, "choose", side_effect=["upload", os.path.join(folder, "list.csv")]) as choose, \
+                mock.patch.object(app, "msg"), mock.patch.object(app, "web_api", side_effect=web_api):
+            app.screen_machines("T", self.MACHINES, "onboarding")
+        self.assertEqual(calls, [("POST", "/api/zededa/machines", {"text": "mac,name\n52-54-00-00-00-01,a\n"})])
+        text = choose.call_args_list[0].args[1]
+        self.assertIn("store-1", text)
+        self.assertIn("stores", text)
+        self.assertEqual([tag for tag, _ in choose.call_args_list[0].args[2]], ["upload", "template", "download", "clear"])
+        calls.clear()
+        with mock.patch.object(app, "choose", return_value="clear"), mock.patch.object(app, "yesno", return_value=True), \
+                mock.patch.object(app, "msg"), mock.patch.object(app, "web_api", side_effect=web_api):
+            app.screen_machines("T", self.MACHINES, "onboarding")
+        self.assertEqual(calls, [("POST", "/api/zededa/machines", {"clear": True})])

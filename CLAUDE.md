@@ -118,8 +118,9 @@ and the UI type check + build.
   (`PlainHandler`); it may only create nodes. The role it needs: Edge Nodes
   Create (+ Read; + Delete only for deleting); keep it working without Read
   and without reading projects. Node names: `{mac}`, `{serial}`, `{n}`/`{n:3}`
-  (`ZEDEDA_NODE_NEXT`, taken only when a node is created) or a name typed in
-  the menu (key n). The list of onboarded machines (`ONBOARDED`, no secrets)
+  (`ZEDEDA_NODE_NEXT`, taken only when a node is created), the machine list
+  (`MACHINES`, CSV upload: name and project per MAC address or hardware
+  serial) or a name typed in the menu (key n), which wins. The list of onboarded machines (`ONBOARDED`, no secrets)
   survives restarts; *Remove from list* / *Clean up* / CSV import never touch
   ZEDEDA, nothing leaves the list automatically, and a node deleted in ZEDEDA
   from the appliance also leaves the list. A pasted API token is checked with

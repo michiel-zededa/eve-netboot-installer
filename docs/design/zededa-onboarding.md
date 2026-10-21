@@ -129,6 +129,25 @@ sequenceDiagram
    **n**, sent as `name=`) replaces the convention for that machine and takes
    no number. Every name is reduced to lower case letters, digits and
    hyphens, at most 63 characters.
+   **The machine list** plans name and project per machine before it is
+   installed (`/etc/eve-netboot/zededa-machines.json`, no secrets, at most
+   2000 rows). It is uploaded as CSV with the columns `mac`,
+   `hardware_serial`, `name` and `project` (comma or semicolon separated, as
+   spreadsheets save it; template:
+   [vm/examples/zededa-machines.csv](../../vm/examples/zededa-machines.csv)).
+   A row needs a MAC address or a hardware serial; name and project may be
+   empty (the naming convention, the onboarding project). An upload replaces
+   the list and is refused as a whole, with the line numbers, when a row is
+   wrong: a bad MAC address, a placeholder serial (*To be filled by O.E.M.*),
+   a name that reduces to nothing, a MAC address, serial or name listed
+   twice. A machine is found by its MAC address first, then by the hardware
+   serial iPXE reads from SMBIOS (`${serial}`, sent as `serial=`, any case).
+   The order: a name typed in the boot menu, the list's name, the naming
+   convention. A project from the list is looked up by name once per session
+   (or taken as an ID). API: `POST /api/zededa/machines {text}` or
+   `{clear: true}`, `GET /api/zededa/machines.csv` and
+   `GET /api/zededa/machines-template.csv`; `GET /api/zededa` gives the rows
+   with the machine onboarded for each.
 3. **Login, in memory only.** With a pasted **API token** (or session token)
    nothing else is needed; it is checked with `GET users/self`, where only
    401 or no answer rejects it (an API token that may not read its user is
@@ -182,7 +201,8 @@ sequenceDiagram
      the ones that failed.
 7. **Console.** The console menu has the same *ZEDEDA onboarding* screen:
    settings, login/logout, the list with the same actions (one machine or
-   *Select several...*), import, and the export (saved in the
+   *Select several...*), import, the machine list (upload from the SMB share
+   or the admin's home folder, template, download, clear), and the export (saved in the
    admin's home folder and on the SMB share). The session stays in the web
    management's process; the console uses it through the web management's
    API on `127.0.0.1` with a key the web management makes at every start and
@@ -221,7 +241,15 @@ sequenceDiagram
   requires the machine to match the model exactly, including network and IO
   adapters, and the boot server cannot check that beforehand; so only for
   batches of the same hardware, with the model shown in the summary.
-- Per-device data from a list (name, project, tags, deployment tag, static IP
+- **Onboarding by hardware serial:** create the node with the machine's own
+  serial (SMBIOS, which iPXE already reads as `${serial}`) instead of the MAC
+  address as soft serial. The node then carries the serial on the label, and
+  onboarding also works with the soft serial off or random (UUID). To verify
+  first: that ZEDEDA matches a node's serial against the hardware serial EVE-OS
+  reports, not only the soft serial (one machine on a real cluster). Machines
+  without a usable serial (empty, *To be filled by O.E.M.*, the same on every
+  unit) fall back to the MAC address.
+- More per-device data from the machine list (tags, deployment tag, static IP
   through the adapter configuration), Edge View and Edge Sync settings.
 - The plain Docker Compose installation: it has no management process to hold
   the session.

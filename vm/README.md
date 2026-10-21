@@ -495,6 +495,39 @@ In the summary of an EVE-OS 17+ image:
 - **o** switches onboarding off (or on again) for this machine; it is on by
   default.
 
+**The machine list** plans the name and project of each machine before it is
+installed, for example from a delivery list: *ZEDEDA onboarding* → *Machine
+list*. Download the **template**, fill it in (a spreadsheet can save it as
+CSV, comma or semicolon separated) and upload it; an upload replaces the
+current list.
+
+```csv
+mac,hardware_serial,name,project
+52-54-00-12-34-56,,bench1-node-001,
+52:54:00:12:34:57,,bench1-node-002,lab-onboarding
+,CZ2345678X,store-0042-edge,stores-europe
+,CZ2345679X,store-0043-edge,
+```
+
+- One row per machine, found by its **MAC address** or by its **hardware
+  serial** (the serial on the label, which the boot menu reads from the
+  BIOS). Either is enough; the MAC address is checked first.
+- **name** empty: the naming convention. **project** empty: the onboarding
+  project of the settings. A project by name needs a role that may read
+  projects; otherwise give its ID.
+- The order for a machine's name: a name typed in the boot menu (**n**), the
+  list, the naming convention. The summary shows the result before you press
+  **i**.
+- A list with mistakes is refused as a whole, with the line numbers: a wrong
+  MAC address, a placeholder instead of a serial (*To be filled by O.E.M.*),
+  a MAC address, serial or name listed twice.
+- The list shows which listed machines are installed and their state in
+  ZEDEDA. It holds no secrets, survives restarts and is not part of the
+  settings export: *Download the list* on the old VM and upload it on the new
+  one.
+- The soft serial stays the MAC address: the hardware serial only finds the
+  machine's row in the list.
+
 The options are only there for EVE-OS 17 and later images:
 the summary of an older image looks exactly as without onboarding. With the
 soft serial switched off (installation options) or nobody logged in to ZEDEDA,
@@ -535,7 +568,9 @@ itself shows as **Deleted in ZEDEDA**.
 - A machine that is installed again is recognised from the list and gets no
   second node, as long as its node still exists in ZEDEDA.
 
-**Roadmap:** onboarding for EVE-OS older than 17 by choosing a hardware model
+**Roadmap:** onboarding by hardware serial (the node created with the
+machine's own serial instead of the MAC address as soft serial), and
+onboarding for EVE-OS older than 17 by choosing a hardware model
 for a batch of identical machines. ZEDEDA requires such a machine to match the
 model exactly, including its network and IO adapters, so it only suits batches
 of the same hardware.

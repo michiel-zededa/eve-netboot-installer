@@ -2,7 +2,7 @@
 // or with the user's password (used once, never kept). The appliance keeps the token in
 // memory only; after a restart or when it expires, log in again.
 import { useEffect, useRef, useState } from "react";
-import { BrushCleaning, Download, FileUp, ListX, LogIn, LogOut, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { BrushCleaning, Download, FileDown, FileUp, ListX, LogIn, LogOut, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { api, type ZededaInfo } from "../admin";
 import { Card } from "../components";
 import { Confirm, errorText, useToast } from "../forms";
@@ -42,6 +42,9 @@ export default function ZededaSession() {
   const [ask, setAsk] = useState<{ action: "delete" | "forget"; nodes: Node[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const machinesRef = useRef<HTMLInputElement>(null);
+  const [machinesError, setMachinesError] = useState("");
+  const [askClear, setAskClear] = useState(false);
   const toast = useToast();
 
   // with a ZEDEDA session also the state of the nodes (did the machines come online?)
@@ -113,6 +116,29 @@ export default function ZededaSession() {
       const r = await api.zededaImport(await file.text());
       toast(t("adm_zo_imported", { n: r.imported, skipped: r.skipped }));
       load(true);
+    } catch (e) {
+      toast(errorText(e), "err");
+    }
+  };
+
+  // the machine list: an upload replaces it (every row must be valid), or clear it
+  const uploadMachines = async (file: File) => {
+    if (machinesRef.current) machinesRef.current.value = "";
+    setMachinesError("");
+    if (file.size > 1024 * 1024) return setMachinesError(t("adm_ml_bad_header"));
+    try {
+      const r = await api.zededaMachines({ text: await file.text() });
+      setInfo((i) => (i ? { ...i, machines: r.machines } : r));
+      toast(t("adm_ml_uploaded", { n: r.count ?? r.machines.length }));
+    } catch (e) {
+      setMachinesError(errorText(e));
+    }
+  };
+  const clearMachines = async () => {
+    try {
+      const r = await api.zededaMachines({ clear: true });
+      setInfo((i) => (i ? { ...i, machines: r.machines } : r));
+      toast(t("adm_ml_cleared"));
     } catch (e) {
       toast(errorText(e), "err");
     }
@@ -192,6 +218,66 @@ export default function ZededaSession() {
             </div>
             <p className="muted small">{t("adm_zo_user_hint")}</p>
           </>
+        )}
+      </Card>
+      <Card title={t("adm_ml_title")} actions={
+        <div className="card-actions">
+          <a className="btn slim" href="api/zededa/machines-template.csv" download>
+            <FileDown size={16} /> {t("adm_ml_template")}
+          </a>
+          <button className="btn slim" onClick={() => machinesRef.current?.click()}>
+            <FileUp size={16} /> {t("adm_ml_upload")}
+          </button>
+          <input ref={machinesRef} type="file" accept=".csv,text/csv" hidden
+            onChange={(e) => e.target.files?.[0] && uploadMachines(e.target.files[0])} />
+          {info.machines.length > 0 && (
+            <>
+              <a className="btn slim" href="api/zededa/machines.csv" download><Download size={16} /> {t("adm_ml_download")}</a>
+              <button className="btn slim" onClick={() => setAskClear(true)}><ListX size={16} /> {t("adm_ml_clear")}</button>
+            </>
+          )}
+        </div>
+      }>
+        <p className="muted small">{t("adm_ml_text")}</p>
+        {machinesError && <div className="alert err multiline"><TriangleAlert size={16} /> <span>{machinesError}</span></div>}
+        {info.machines.length === 0 ? (
+          <p className="muted">{t("adm_ml_none")}</p>
+        ) : (
+          <div className="table-card">
+            <table className="table compact">
+              <thead>
+                <tr>
+                  <th>{t("adm_zo_col_name")}</th>
+                  <th>{t("adm_zo_col_mac")}</th>
+                  <th>{t("adm_ml_col_serial")}</th>
+                  <th>{t("adm_ml_col_project")}</th>
+                  <th>{t("adm_ml_col_installed")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {info.machines.map((m) => (
+                  <tr key={m.mac || m.hardware_serial}>
+                    <td className="nowrap">
+                      {m.name ? <strong>{m.name}</strong> : <span className="muted">{t("ob_name_auto")}</span>}
+                    </td>
+                    <td className="mono nowrap">{m.mac || "-"}</td>
+                    <td className="mono">{m.hardware_serial || "-"}</td>
+                    <td>{m.project || <span className="muted">{info.project}</span>}</td>
+                    <td>
+                      {m.node ? (
+                        <span className={`pill ${m.node.result === "failed" ? "err" : STATE_TONE[m.node.state] ?? "ok"}`}>
+                          {m.node.result === "failed" || !m.node.state ? t(`adm_zo_result_${m.node.result}`)
+                                                                         : t(`adm_zo_state_${m.node.state}`)}
+                        </span>
+                      ) : (
+                        <span className="muted">{t("adm_ml_not_yet")}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
       <Card title={t("adm_zo_onboarded")} actions={
@@ -313,6 +399,10 @@ export default function ZededaSession() {
           </div>
         )}
       </Card>
+      {askClear && (
+        <Confirm title={t("adm_ml_clear")} text={t("adm_ml_clear_q", { n: info.machines.length })}
+          confirm={t("adm_ml_clear")} onConfirm={clearMachines} onClose={() => setAskClear(false)} />
+      )}
       {ask && (
         <Confirm danger={ask.action === "delete"}
           title={ask.action === "delete" ? t("adm_zo_delete") : t("adm_zo_forget")}

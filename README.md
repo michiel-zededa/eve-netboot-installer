@@ -90,7 +90,7 @@ All taken in a documentation network (`192.0.2.0/24`).
 | **Multilingual** | Boot menu, web UI and the VM's console and web management in English, German, French, Spanish, Portuguese, Dutch, Danish and Norwegian. |
 | **One `.env` file** | Every setting lives in `.env`. It is portable across plain Docker, NAS compose plugins and VMs. |
 | **Ready-made VM** | A VM appliance (qcow2 for amd64/arm64, OVA for VMware): set up on its screen, in a browser or through cloud-init; web management over HTTPS (settings, ISO upload, logs, updates, diagnostics, network changes with automatic rollback); an optional DHCP service of its own (proxyDHCP next to your DHCP server, or a full DHCP server for an isolated network); automatic security updates and app updates with rollback. |
-| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. Node names follow a naming convention with the MAC address, the hardware serial or a sequence number (`bench1-node-{n:3}`), or are typed per machine in the boot menu. You log in to ZEDEDA in the web management or the console; the session is kept in memory only. The list of onboarded machines shows each node's state in ZEDEDA; it can be exported and imported as CSV, cleaned up, and nodes can be deleted again from the appliance, one by one or several at once. See [ZEDEDA onboarding](#zededa-onboarding). |
+| **ZEDEDA onboarding** | VM appliance: install many machines at once and have them onboarded in ZEDEDA in the same go, without looking up serial numbers. Every machine gets its MAC address as soft serial; when you press **`i`**, the VM creates its edge node in an onboarding project, from where you move it to its own project once it is online. The node is created without a model, so **only for EVE-OS 17.0.0-lts and later**, which report their own hardware; the option appears only in the summary of those images. Node names follow a naming convention with the MAC address, the hardware serial or a sequence number (`bench1-node-{n:3}`), come from a machine list (CSV, per MAC address or hardware serial, with a project per machine), or are typed per machine in the boot menu. You log in to ZEDEDA in the web management or the console; the session is kept in memory only. The list of onboarded machines shows each node's state in ZEDEDA; it can be exported and imported as CSV, cleaned up, and nodes can be deleted again from the appliance, one by one or several at once. See [ZEDEDA onboarding](#zededa-onboarding). |
 
 ## How it works
 
@@ -159,8 +159,10 @@ sequenceDiagram
 3. The node's name follows your naming convention: the MAC address, the
    hardware serial or a sequence number (`bench1-node-{n:3}` gives
    `bench1-node-001`, `-002`, … for the machines of a staging bench), or a
-   name typed for that machine in the boot menu. ZEDEDA cannot rename a node
-   later, so it is fixed at installation.
+   name typed for that machine in the boot menu. A **machine list** (CSV,
+   uploaded in the web management or the console) can plan the name and
+   project of each machine by its MAC address or hardware serial. ZEDEDA
+   cannot rename a node later, so it is fixed at installation.
 4. After the installation EVE-OS registers, comes online and reports its
    adapters. You assign them to network instances and move the node to the
    project it belongs in.
@@ -417,7 +419,7 @@ Issues and pull requests are welcome. Useful contributions include:
 - reports from real hardware (vendor, model, architecture);
 - additional DHCP server examples;
 - new translations;
-- on the roadmap: ZEDEDA onboarding for EVE-OS older than 17, with a hardware model chosen for a batch of identical machines.
+- on the roadmap: ZEDEDA onboarding by hardware serial instead of the MAC address as soft serial, and for EVE-OS older than 17 with a hardware model chosen for a batch of identical machines.
 
 Before submitting:
 

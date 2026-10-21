@@ -69,6 +69,15 @@ ONBOARD_PER_MINUTE = 60     # registrations from the boot menu, all machines tog
 ONBOARD_KEEP = 200          # nodes remembered for the overview
 STATUS_EVERY = 20           # seconds between status checks of the onboarded nodes in ZEDEDA
 STATUS_MAX = 100            # nodes checked (the newest)
+MACHINES_MAX = 2000         # rows of the machine list
+# the machine list's template (also vm/examples/zededa-machines.csv): a machine by
+# its MAC address or its hardware serial; name and project may be empty
+MACHINES_TEMPLATE = """mac,hardware_serial,name,project
+52-54-00-12-34-56,,bench1-node-001,
+52:54:00:12:34:57,,bench1-node-002,lab-onboarding
+,CZ2345678X,store-0042-edge,stores-europe
+,CZ2345679X,store-0043-edge,
+"""
 
 
 class HttpError(Exception):
@@ -118,6 +127,9 @@ class App:
         # the machines onboarded (newest first; no secrets, kept in core.ONBOARDED):
         # {"mac", "name", "node_id", "project", "hardware_serial", "product", "result", "message", "time"}
         self.onboarded = self.load_onboarded()
+        # the machine list: names and projects planned per machine (core.MACHINES, uploaded as CSV)
+        # {"mac", "hardware_serial", "name", "project"}, mac or hardware_serial may be ""
+        self.machines = self.load_machines()
         self.onboard_times = []
         self.number_lock = threading.Lock()   # one registration at a time: unique sequence numbers
         self.status_checked = 0.0
@@ -167,6 +179,25 @@ class App:
             self.onboarded = [e for e in self.onboarded if e["mac"] not in macs]
             self.save_onboarded()
             return before - len(self.onboarded)
+
+    def load_machines(self):
+        try:
+            data = json.loads(self.core.read(self.core.MACHINES) or "[]")
+            return [m for m in data if isinstance(m, dict) and (m.get("mac") or m.get("hardware_serial"))]
+        except ValueError:
+            return []
+
+    def save_machines(self, rows):
+        with self.lock:
+            self.machines = rows
+            self.core.write(self.core.MACHINES, json.dumps(rows, indent=1) + "\n")
+
+    def planned(self, mac, hw_serial):
+        """This machine's row of the machine list: by MAC address, else by hardware serial."""
+        serial = hw_serial.strip().lower()
+        return (next((m for m in self.machines if m.get("mac") == mac), None)
+                or next((m for m in self.machines if serial and zededa.usable_serial(serial)
+                         and m.get("hardware_serial", "").lower() == serial), None))
 
     def onboarded_node(self, mac):
         """The node this appliance registered for a MAC address (not deleted), or None."""
@@ -424,6 +455,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name = f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv"
             return self.send(200, self.zededa_csv(), "text/csv; charset=utf-8",
                              {"Content-Disposition": f'attachment; filename="{name}"'})
+        if path in ("/api/zededa/machines.csv", "/api/zededa/machines-template.csv"):
+            name = ("zededa-machines-template.csv" if "template" in path else
+                    f"zededa-machines-{datetime.datetime.now():%Y%m%d-%H%M}.csv")
+            text = MACHINES_TEMPLATE if "template" in path else self.machines_csv()
+            return self.send(200, text, "text/csv; charset=utf-8",
+                             {"Content-Disposition": f'attachment; filename="{name}"'})
         if path == "/api/diagnostics":
             name = f"eve-netboot-diagnostics-{datetime.datetime.now():%Y%m%d-%H%M}.tar.gz"
             return self.send(200, self.diagnostics(), "application/gzip",
@@ -533,6 +570,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.zededa_forget(self.macs(self.json_body()))
         if method == "POST" and path == "/api/zededa/import":
             return self.zededa_import(str(self.json_body().get("text") or ""))
+        if method == "POST" and path == "/api/zededa/machines":
+            return self.zededa_machines(self.json_body())
         if method == "DELETE" and path == "/api/images":
             return self.delete_image(query.get("file", [""])[0])
         raise HttpError(404, "Unknown API.")
@@ -749,7 +788,114 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "user": z["user"], "enterprise": z["enterprise"], "cluster": z["cluster"], "via": z["via"],
                 "since": z["since"], "expires": z.get("expires"), "project_id": z.get("project_id", "")},
             "onboarded": list(self.app.onboarded),
+            "machines": self.machines_info(),
         }
+
+    def machines_info(self):
+        """The machine list, each row with the machine onboarded for it (if any)."""
+        out = []
+        for m in self.app.machines:
+            serial = (m.get("hardware_serial") or "").lower()
+            node = next((e for e in self.app.onboarded if (m.get("mac") and e["mac"] == m["mac"])
+                         or (serial and (e.get("hardware_serial") or "").lower() == serial)), None)
+            out.append({**m, "node": None if not node else {
+                "name": node.get("name", ""), "mac": node["mac"], "result": node.get("result", ""),
+                "state": (node.get("status") or {}).get("state", "")}})
+        return out
+
+    def parse_machines(self, text):
+        """The rows of an uploaded machine list (CSV) -> (rows, errors). Comma or
+        semicolon separated (as spreadsheets save it), with a header line."""
+        c = self.core
+        text = text.lstrip("\ufeff")
+        first = text.split("\n", 1)[0]
+        delimiter = ";" if first.count(";") > first.count(",") else ","
+        try:
+            reader = csv.DictReader(io.StringIO(text[:MAX_JSON]), delimiter=delimiter)
+            header = [h.strip().lower() for h in reader.fieldnames or []]
+        except csv.Error:
+            header = []
+        if "name" not in header or not {"mac", "hardware_serial"} & set(header):
+            return [], [c.tr("adm_ml_bad_header")]
+        reader.fieldnames = header
+        rows, errors, seen = [], [], set()
+        try:
+            for r in reader:
+                line = reader.line_num
+                v = {k: str(r.get(k) or "").strip() for k in ("mac", "hardware_serial", "name", "project")}
+                if not any(v.values()):
+                    continue
+                if len(rows) >= MACHINES_MAX:
+                    errors.append(c.tr("adm_ml_too_many", n=MACHINES_MAX))
+                    break
+                digits = re.sub(r"[^0-9a-f]", "", v["mac"].lower())
+                mac = "-".join(digits[i:i + 2] for i in range(0, 12, 2)) if len(digits) == 12 else ""
+                problem = ""
+                if v["mac"] and not mac:
+                    problem = c.tr("adm_ml_bad_mac", mac=v["mac"])
+                elif v["hardware_serial"] and not zededa.usable_serial(v["hardware_serial"]):
+                    problem = c.tr("adm_ml_bad_serial", serial=v["hardware_serial"])
+                elif not (mac or v["hardware_serial"]):
+                    problem = c.tr("adm_ml_no_key")
+                elif v["name"] and not zededa.clean_name(v["name"]):
+                    problem = c.tr("adm_ml_bad_name", name=v["name"])
+                else:
+                    keys = [k for k in (("mac", mac), ("serial", v["hardware_serial"].lower()),
+                                        ("name", zededa.clean_name(v["name"]))) if k[1]]
+                    twice = [k[1] for k in keys if k in seen]
+                    if twice:
+                        problem = c.tr("adm_ml_twice", value=twice[0])
+                    seen.update(keys)
+                if problem:
+                    errors.append(c.tr("adm_ml_line", line=line, problem=problem))
+                    continue
+                rows.append({"mac": mac, "hardware_serial": v["hardware_serial"][:64],
+                             "name": zededa.clean_name(v["name"]), "project": v["project"][:256]})
+        except csv.Error as e:
+            errors.append(str(e))
+        return rows, errors
+
+    def zededa_machines(self, body):
+        """Replace the machine list with an uploaded one (all rows valid), or clear it."""
+        c = self.core
+        if body.get("clear"):
+            self.app.save_machines([])
+            c.log(f"web: machine list cleared ({self.client_ip()})")
+            return self.send(200, {"ok": True, **self.zededa_info()})
+        rows, errors = self.parse_machines(str(body.get("text") or ""))
+        if errors:
+            more = len(errors) - 10
+            raise HttpError(400, "\n".join(errors[:10] + ([c.tr("adm_ml_more", n=more)] if more > 0 else [])))
+        if not rows:
+            raise HttpError(400, c.tr("adm_ml_empty"))
+        self.app.save_machines(rows)
+        c.log(f"web: machine list uploaded: {len(rows)} machine(s) ({self.client_ip()})")
+        self.send(200, {"ok": True, "count": len(rows), **self.zededa_info()})
+
+    def machines_csv(self):
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["mac", "hardware_serial", "name", "project"])
+        for m in self.app.machines:
+            w.writerow([m.get("mac", ""), m.get("hardware_serial", ""), m.get("name", ""), m.get("project", "")])
+        return out.getvalue()
+
+    def project_id(self, project, z, client):
+        """The ID of a project by name (looked up once per session) or as given."""
+        c = self.core
+        if project == c.get(c.load_settings(), "ZEDEDA_PROJECT") and z.get("project_id"):
+            return z["project_id"]
+        if UUID_RE.match(project):
+            return project
+        cache = z.setdefault("projects", {})
+        if not cache.get(project):
+            try:
+                cache[project] = (client.project(project) or {}).get("id", "")
+            except zededa.ZededaError as e:
+                raise zededa.ZededaError(400, c.tr("adm_zo_project_unknown", project=project, error=str(e))) from None
+        if not cache[project]:
+            raise zededa.ZededaError(400, c.tr("adm_zo_project_unknown", project=project, error="-"))
+        return cache[project]
 
     def zededa_login(self):
         """Log in with a password (used once, never kept) or check a pasted
@@ -832,7 +978,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return answer(False, c.tr("adm_zo_not_logged_in"))
         hw_serial = q.get("serial", "")[:64]
         typed = zededa.clean_name(q.get("name", ""))      # a name typed in the boot menu (key n)
-        project = c.get(s, "ZEDEDA_PROJECT")
+        plan = self.app.planned(mac, hw_serial) or {}     # the machine list's name and project
+        project = plan.get("project") or c.get(s, "ZEDEDA_PROJECT")
+        typed = typed or plan.get("name", "")
         known = self.app.onboarded_node(mac)
         if known and self.still_there(known, z) is False:
             known = None                                  # deleted in ZEDEDA itself: a new node
@@ -859,7 +1007,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if known and self.still_there(known, z) is not False:
             return True, c.tr("adm_zo_exists", name=known["name"])
         s = c.load_settings()
-        template, project = c.get(s, "ZEDEDA_NODE_NAME"), c.get(s, "ZEDEDA_PROJECT")
+        plan = self.app.planned(mac, hw_serial) or {}     # the machine list's name and project
+        template, project = c.get(s, "ZEDEDA_NODE_NAME"), plan.get("project") or c.get(s, "ZEDEDA_PROJECT")
+        typed = typed or plan.get("name", "")
         number = None if typed or not zededa.uses_number(template) else int(c.get(s, "ZEDEDA_NODE_NEXT"))
         name = typed or zededa.node_name(template, mac, hw_serial, number)
         entry = {"mac": mac, "name": name, "node_id": "", "project": project, "hardware_serial": hw_serial,
@@ -875,15 +1025,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return False                              # unknown
 
         try:
-            if not z.get("project_id"):
-                raise zededa.ZededaError(400, c.tr("adm_zo_project_unknown", project=project, error="-"))
+            project_id = self.project_id(project, z, client)
             node = lookup()
             if node:
                 entry.update(result="exists", name=node.get("name", name), node_id=node.get("id", ""))
                 text = c.tr("adm_zo_exists", name=entry["name"])
             else:
                 try:
-                    entry["node_id"] = client.create_modelless(name, name, z["project_id"], mac,
+                    entry["node_id"] = client.create_modelless(name, name, project_id, mac,
                                                                c.get(s, "ZEDEDA_ONBOARDING_KEY"))
                     entry["result"] = "created"
                     text = c.tr("adm_zo_created", name=name, project=project)

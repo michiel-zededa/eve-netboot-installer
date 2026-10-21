@@ -111,6 +111,8 @@ export const api = {
   zededaImport: (text: string) =>
     call<ZededaInfo & { imported: number; skipped: number }>("POST", "api/zededa/import", { text }),
   zededaStatus: (force = false) => call<ZededaInfo>("GET", `api/zededa/status${force ? "?force=1" : ""}`),
+  zededaMachines: (body: { text: string } | { clear: true }) =>
+    call<ZededaInfo & { count?: number }>("POST", "api/zededa/machines", body),
 };
 
 /** ZEDEDA onboarding: the session lives in the appliance's memory only. */
@@ -130,6 +132,14 @@ export interface ZededaInfo {
     expires: number | null;
     project_id: string;
   };
+  // the machine list: name and project planned per machine (by MAC address or hardware serial)
+  machines: {
+    mac: string;
+    hardware_serial: string;
+    name: string;
+    project: string;
+    node: null | { name: string; mac: string; result: string; state: string };
+  }[];
   onboarded: {
     mac: string;
     name: string;

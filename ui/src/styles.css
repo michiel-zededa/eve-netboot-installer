@@ -446,6 +446,7 @@ input:focus, textarea:focus, select:focus { outline: 0; border-color: var(--acce
 .save-status.err { color: var(--err); }
 .alert { display: flex; align-items: flex-start; gap: 8px; }
 .alert svg { flex: none; margin-top: 2px; }
+.alert.multiline span { white-space: pre-line; }   /* one problem per line (the machine list) */
 
 .manage { margin-right: 6px; }
 .avatar {

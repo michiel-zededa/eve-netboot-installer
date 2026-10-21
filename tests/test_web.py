@@ -74,7 +74,7 @@ class WebBase(unittest.TestCase):
             f.write("<html>ui</html>")
         with open(os.path.join(TMP, "secret.txt"), "w") as f:
             f.write("outside the web root")
-        for path in (core.SETTINGS, core.CONFIGURED, core.ONBOARDED):
+        for path in (core.SETTINGS, core.CONFIGURED, core.ONBOARDED, core.MACHINES):
             if os.path.exists(path):
                 os.remove(path)
         self.applied = []
@@ -416,6 +416,7 @@ class FakeZededa:
     created = []
     logins = []
     states = {}
+    projects = []
 
     def __init__(self, cluster, token=None, opener=None):
         self.cluster, self.token = cluster, token
@@ -433,7 +434,10 @@ class FakeZededa:
         pass
 
     def project(self, name):
-        return {"id": "proj-1", "name": name, "appPolicy": None}
+        FakeZededa.projects.append(name)
+        if name == "missing":
+            raise web.zededa.ZededaError(404, "not found")
+        return {"id": "proj-1" if name == "netboot" else "proj-" + name, "name": name, "appPolicy": None}
 
     def device_by_serial(self, serial):
         return FakeZededa.nodes.get(serial)
@@ -458,6 +462,7 @@ class ZededaWebTest(WebBase):
     def setUp(self):
         super().setUp()
         FakeZededa.nodes, FakeZededa.created, FakeZededa.logins, FakeZededa.states = {}, [], [], {}
+        FakeZededa.projects = []
         p = mock.patch.object(web.zededa, "Client", FakeZededa)
         p.start()
         self.addCleanup(p.stop)
@@ -760,6 +765,62 @@ class ZededaWebTest(WebBase):
         # importing it again changes nothing
         self.assertEqual(self.request("POST", "/api/zededa/import", {"text": csv_text})[1]["imported"], 0)
         self.assertEqual(self.request("POST", "/api/zededa/import", {"text": "a,b\n1,2"})[0], 400)
+
+    def test_machine_list(self):
+        """Planned names and projects: by MAC address or hardware serial; a typed name still wins."""
+        self.zededa_login()
+        status, body, _ = self.request("GET", "/api/zededa/machines-template.csv")
+        self.assertEqual(body.decode(), core.read(os.path.join(ROOT, "vm/examples/zededa-machines.csv")))
+        status, body, _ = self.request("POST", "/api/zededa/machines", {"text": body.decode()})
+        self.assertEqual((status, body["count"]), (200, 4), body)
+        # spreadsheets: a byte order mark, semicolons, MAC addresses with colons
+        text = ("\ufeffMAC;Hardware_Serial;Name;Project\r\n52:54:00:12:34:56;;Bench1-Node-001;\r\n"
+                ";CZ2345678X;store-0042-edge;stores-europe\r\n;;;\r\n52-54-00-00-00-09;;;\r\n")
+        status, body, _ = self.request("POST", "/api/zededa/machines", {"text": text})
+        self.assertEqual((status, body["count"]), (200, 3), body)
+        self.assertEqual([(m["mac"], m["hardware_serial"], m["name"], m["project"]) for m in body["machines"]],
+                         [(self.MAC, "", "bench1-node-001", ""), ("", "CZ2345678X", "store-0042-edge", "stores-europe"),
+                          ("52-54-00-00-00-09", "", "", "")])
+        # by MAC address: its name, the onboarding project
+        ob = self.onboard("preview")
+        self.assertEqual(ob["eve_ob_s"], "bench1-node-001 in netboot")
+        self.onboard()
+        self.assertEqual(FakeZededa.created[-1][:3], ("bench1-node-001", "proj-1", self.MAC))
+        # by hardware serial (any case): its name and project, looked up once
+        other = "52-54-00-00-00-02"
+        self.assertEqual(self.onboard("preview", mac=other, serial="cz2345678x")["eve_ob_s"],
+                         "store-0042-edge in stores-europe")
+        self.onboard(mac=other, serial="cz2345678x")
+        self.onboard(mac="52-54-00-00-00-03", serial="CZ2345678X")
+        self.assertEqual(FakeZededa.created[1][:3], ("store-0042-edge", "proj-stores-europe", other))
+        self.assertEqual(FakeZededa.projects, ["netboot", "stores-europe"])     # netboot: at the login
+        # a name typed in the boot menu wins; listed without a name: the naming convention
+        self.assertEqual(self.onboard("preview", mac="52-54-00-00-00-09", name="by-hand")["eve_ob_s"], "by-hand in netboot")
+        self.assertEqual(self.onboard("preview", mac="52-54-00-00-00-09")["eve_ob_s"], "eve-52-54-00-00-00-09 in netboot")
+        status, body, _ = self.request("GET", "/api/zededa")
+        installed = {m["name"]: (m["node"] or {}).get("name") for m in body["machines"]}
+        self.assertEqual(installed, {"bench1-node-001": "bench1-node-001", "store-0042-edge": "store-0042-edge", "": None})
+        self.assertIn("store-0042-edge", self.request("GET", "/api/zededa/machines.csv")[1].decode())
+        # an unknown project fails that machine only
+        self.request("POST", "/api/zededa/machines", {"text": "mac,name,project\n52-54-00-00-00-04,x1,missing\n"})
+        ob = self.onboard(mac="52-54-00-00-00-04")
+        self.assertEqual(ob["eve_ob_ok"], "0")
+        self.assertIn("missing", ob["eve_ob_s"])
+        # a list with errors is refused as a whole, with the lines
+        bad = ("mac,hardware_serial,name,project\nzz,,a,\n,To be filled by O.E.M.,b,\n,,c,\n"
+               "52-54-00-00-00-05,,Bad Name!!,\n52-54-00-00-00-05,,d,\n52-54-00-00-00-06,,-- ,\n")
+        status, body, _ = self.request("POST", "/api/zededa/machines", {"text": bad})
+        self.assertEqual(status, 400)
+        for line in ("Line 2:", "Line 3:", "Line 4:", "Line 6:", "Line 7:"):
+            self.assertIn(line, body["error"])
+        self.assertNotIn("Line 5:", body["error"])               # Bad Name!! -> bad-name
+        self.assertEqual(self.request("POST", "/api/zededa/machines", {"text": "a,b\n1,2"})[0], 400)
+        self.assertEqual(len(self.request("GET", "/api/zededa")[1]["machines"]), 1)     # unchanged
+        # cleared; the list survives a restart
+        web.Handler.app = web.App(core)
+        self.assertEqual(len(web.Handler.app.machines), 1)
+        self.login()
+        self.assertEqual(self.request("POST", "/api/zededa/machines", {"clear": True})[1]["machines"], [])
 
     def test_delete_needs_the_right(self):
         def forbidden(client, node_id):
