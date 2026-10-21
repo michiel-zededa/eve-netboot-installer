@@ -258,7 +258,7 @@ export default function ZededaSession() {
                 {info.machines.map((m) => (
                   <tr key={m.mac || m.hardware_serial}>
                     <td className="nowrap">
-                      {m.name ? <strong>{m.name}</strong> : <span className="muted">{t("ob_name_auto")}</span>}
+                      {m.name ? <strong>{m.name}</strong> : <span className="muted mono">{info.node_name}</span>}
                     </td>
                     <td className="mono nowrap">{m.mac || "-"}</td>
                     <td className="mono">{m.hardware_serial || "-"}</td>

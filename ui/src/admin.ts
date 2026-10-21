@@ -123,6 +123,7 @@ export interface ZededaInfo {
   user: string;
   login: "token" | "password";
   project: string;
+  node_name: string;      // the naming convention
   session: null | {
     user: string;
     enterprise: string;

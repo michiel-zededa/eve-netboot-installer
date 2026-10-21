@@ -1924,7 +1924,7 @@ def screen_zededa(s):
             elif c == "import":
                 zededa_import_list(title)
             elif c == "machines":
-                screen_machines(title, info.get("machines", []), info.get("project", ""))
+                screen_machines(title, info.get("machines", []), info.get("project", ""), info.get("node_name", ""))
             elif c == "export":
                 save_csv(title, "/api/zededa/export", f"zededa-onboarded-{datetime.datetime.now():%Y%m%d-%H%M}.csv",
                          "adm_zo_exported")
@@ -2015,11 +2015,11 @@ def pick_csv(title, text):
     return choose(title, text, [(f, f) for f in files[-14:]], cancel=tr("adm_btn_cancel"))
 
 
-def screen_machines(title, machines, project):
+def screen_machines(title, machines, project, convention=""):
     """The machine list: names and projects planned per machine (MAC address or
     hardware serial). Upload (replaces it), save the template or the list, clear."""
     title = f"{title}: {tr('adm_ml_title')}"
-    rows = "\n".join(f"{cut(m['name'] or '-', 22):<22} {cut(m['mac'] or m['hardware_serial'], 20):<20} "
+    rows = "\n".join(f"{cut(m['name'] or convention or '-', 22):<22} {cut(m['mac'] or m['hardware_serial'], 20):<20} "
                      f"{cut(m['project'] or project, 18):<18} "
                      f"{tr('adm_ml_not_yet') if not m.get('node') else m['node']['name']}" for m in machines[:12])
     more = len(machines) - 12

@@ -784,6 +784,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "user": c.get(s, "ZEDEDA_USER"),
             "login": c.get(s, "ZEDEDA_LOGIN"),
             "project": c.get(s, "ZEDEDA_PROJECT"),
+            "node_name": c.get(s, "ZEDEDA_NODE_NAME"),
             "session": None if not z else {
                 "user": z["user"], "enterprise": z["enterprise"], "cluster": z["cluster"], "via": z["via"],
                 "since": z["since"], "expires": z.get("expires"), "project_id": z.get("project_id", "")},
