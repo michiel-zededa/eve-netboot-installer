@@ -280,7 +280,7 @@ The most important ones:
 | `EVE_FLAVOURS` | `kvm` | `kvm`, `k` or both |
 | `EVE_LTS_LINES` | `3` | Number of LTS lines to mirror |
 | `ENI_MENU_TIMEOUT` | `300` | Seconds until the menu boots the local disk (`0` = wait) |
-| `ENI_MENU_MODE` | `standalone` | `chained` when called from another iPXE menu (exit returns to that menu instead of the local disk) |
+| `ENI_MENU_MODE` | `standalone` | `chained` when another iPXE menu calls this one as one of its entries (*Called from another iPXE menu* on the VM): exit returns to that menu instead of booting the local disk, and there is no timeout |
 | `EVE_DEFAULT_*` | | Default values of the installation options (disk, persist disk, controller, serial console, …) |
 | `IPXE_ALIASES_X86_64` | | Extra file names for the iPXE binary, to match a boot file name your DHCP already hands out |
 | `ENI_GITHUB_TOKEN` | | Optional; raises the GitHub API rate limit (formerly `EVE_GITHUB_TOKEN`, before that `GITHUB_TOKEN`) |

@@ -97,11 +97,11 @@ export const SECTIONS: Section[] = [
     id: "bootmenu",
     fields: (info, t) => [
       field(t, "ENI_LANGUAGE", "select", { options: info?.choices.languages ?? [["en", "English"]] }),
-      field(t, "ENI_MENU_MODE", "select", { values: ["standalone", "chained"] }),
       field(t, "ENI_MENU_TIMEOUT", "number", { placeholder: "300" }),
       field(t, "ENI_IMPORT_LABEL", "text", { placeholder: "import share" }),
       field(t, "IPXE_ALIASES_X86_64", "text"),
       field(t, "IPXE_ALIASES_ARM64", "text"),
+      field(t, "ENI_MENU_MODE", "select", { values: ["standalone", "chained"] }),
     ],
   },
   {
