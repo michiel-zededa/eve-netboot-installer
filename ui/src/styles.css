@@ -199,8 +199,9 @@ a.stat:hover { border-color: var(--accent); }
 .stat-value.ok { color: var(--ok); }
 .stat-value.err { color: var(--err); }
 .stat-label { font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
-.stat-ghost { position: absolute; right: 18px; bottom: 16px; color: var(--border); }
-.stat-ghost svg { width: 54px; height: 54px; stroke-width: 1.2; }
+/* the ghost icon sits beside the number (anchored to the top): a label, even on two lines, never runs into it */
+.stat-ghost { position: absolute; right: 18px; top: 82px; color: var(--border); }
+.stat-ghost svg { width: 48px; height: 48px; stroke-width: 1.2; }
 
 /* ---- donut */
 .donut { position: relative; width: 190px; margin: 4px auto 16px; }
