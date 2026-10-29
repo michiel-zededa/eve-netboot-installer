@@ -417,6 +417,7 @@ class FakeZededa:
     logins = []
     states = {}
     projects = []
+    activated = []
 
     def __init__(self, cluster, token=None, opener=None):
         self.cluster, self.token = cluster, token
@@ -442,6 +443,9 @@ class FakeZededa:
     def device_by_serial(self, serial):
         return FakeZededa.nodes.get(serial)
 
+    def activate_device(self, node_id):
+        FakeZededa.activated.append(node_id)
+
     def device_status(self, node_id):
         state = FakeZededa.states.get(node_id, "waiting")
         if isinstance(state, Exception):
@@ -462,7 +466,7 @@ class ZededaWebTest(WebBase):
     def setUp(self):
         super().setUp()
         FakeZededa.nodes, FakeZededa.created, FakeZededa.logins, FakeZededa.states = {}, [], [], {}
-        FakeZededa.projects = []
+        FakeZededa.projects, FakeZededa.activated = [], []
         p = mock.patch.object(web.zededa, "Client", FakeZededa)
         p.start()
         self.addCleanup(p.stop)
@@ -561,6 +565,31 @@ class ZededaWebTest(WebBase):
         status, body, _ = self.request("GET", "/api/zededa")
         self.assertEqual([(n["mac"], n["result"], n["product"]) for n in body["onboarded"]],
                          [(self.MAC, "created", "X1")])
+
+    def test_new_nodes_are_activated(self):
+        self.zededa_login()
+        self.onboard()
+        self.assertEqual(FakeZededa.activated, ["node-1"])
+        self.onboard()                                              # already registered: not again
+        self.assertEqual(FakeZededa.activated, ["node-1"])
+        # switched off: created only
+        core.save_settings({**core.load_settings(), "ZEDEDA_ACTIVATE": "no"})
+        self.onboard(mac="52-54-00-00-00-02")
+        self.assertEqual(FakeZededa.activated, ["node-1"])
+        self.assertEqual(len(FakeZededa.created), 2)
+
+    def test_a_role_that_may_not_activate(self):
+        def forbidden(client, node_id):
+            raise web.zededa.ZededaError(403, "permission denied")
+        self.addCleanup(setattr, FakeZededa, "activate_device", FakeZededa.__dict__["activate_device"])
+        FakeZededa.activate_device = forbidden
+        self.zededa_login()
+        ob = self.onboard()
+        self.assertEqual(ob["eve_ob_ok"], "1")                      # the node exists: install anyway
+        self.assertIn("NOT activated", ob["eve_ob_s"])
+        node = self.request("GET", "/api/zededa")[1]["onboarded"][0]
+        self.assertEqual(node["result"], "created")
+        self.assertIn("may not activate", node["message"])
 
     def test_boot_menu_requests_are_checked(self):
         self.start_tls()

@@ -84,6 +84,7 @@ the behaviour of the API:
 | `GET /api/v1/projects/name/{name}` | project ID and policies | not called when the project is given by its ID |
 | `GET /api/v1/devices/serial/{serialno}` | duplicate check | 404 = no such node |
 | `DELETE /api/v1/devices/id/{id}` | delete a node this appliance created | 404 = already gone |
+| `PUT /api/v1/devices/id/{id}/activate` | activate the node just created | with `ZEDEDA_ACTIVATE=yes` (the default): a node that is not active cannot onboard. Idempotent. When it fails (403: the role may not), the node stays created and the boot menu says *NOT activated*. |
 | `POST /api/v1/devices/model-less` | create the node | the `DeviceConfig` of `POST /api/v1/devices` without `modelId` (that call answers 400 `Invalid Model` without one). Not in the published definitions; it is the call the ZEDEDA UI uses for a node without a model, so errors are shown as the controller words them. The onboarding key goes in **`obkey`** (stored as `<key>:<serial>`), the soft serial in `serialno`. |
 
 Every call after the login carries `Authorization: Bearer <token.base64>`.
@@ -113,7 +114,8 @@ sequenceDiagram
    (`zedcontrol.zededa.net`), `ZEDEDA_LOGIN` (`token`, the default, or
    `password`), `ZEDEDA_ENTERPRISE` and `ZEDEDA_USER` (only shown and needed
    with `password`),
-   `ZEDEDA_PROJECT` (name or ID), `ZEDEDA_ONBOARDING_KEY` (the default key),
+   `ZEDEDA_PROJECT` (name or ID), `ZEDEDA_ACTIVATE` (`yes`: activate every
+   node right after creating it), `ZEDEDA_ONBOARDING_KEY` (the default key),
    `ZEDEDA_NODE_NAME` (the naming convention, `eve-{mac}`) and
    `ZEDEDA_NODE_NEXT` (the next sequence number, `1`). The same group in the
    console menu and the web management. With onboarding on, the stack gets
@@ -221,10 +223,12 @@ sequenceDiagram
   | `POST devices/model-less` | **Edge Nodes: Create** (required) |
   | `GET devices/serial/{serial}` | **Edge Nodes: Read** (optional: without it the duplicate check is skipped, and a refused duplicate, 409, counts as already there) |
   | `GET projects/name/{name}` | reading projects (optional: with the project's ID in `ZEDEDA_PROJECT` it is not looked up) |
+  | `PUT devices/id/{id}/activate` | activating edge nodes (with *Activate nodes* on; without it the node is created but not activated) |
   | `DELETE devices/id/{id}` | **Edge Nodes: Delete** (optional: only to delete nodes from the appliance) |
 
 - `/ipxe/onboard` is reachable over plain HTTP from the boot network. It can
-  only create a node, never change or delete one; for a valid MAC address
+  only create a node (and activate the node it just created), never change or
+  delete another; for a valid MAC address
   (`aa-bb-cc-dd-ee-ff`), once per MAC address (duplicate check), at most 60
   registrations a minute, only while someone is logged in, and only in the
   configured project. Logging out of ZEDEDA after a batch closes it.

@@ -1037,6 +1037,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                                c.get(s, "ZEDEDA_ONBOARDING_KEY"))
                     entry["result"] = "created"
                     text = c.tr("adm_zo_created", name=name, project=project)
+                    if c.get(s, "ZEDEDA_ACTIVATE") == "yes":
+                        # a node created inactive cannot onboard; the node stays when this fails
+                        try:
+                            client.activate_device(entry["node_id"])
+                        except zededa.ZededaError as e:
+                            entry["message"] = c.tr("adm_zo_not_activated", error=str(e) if e.status != 403
+                                                    else c.tr("adm_zo_activate_forbidden"))
+                            text = c.tr("adm_zo_created_inactive", name=name, project=project)
                     if number is not None:            # the next machine gets the next number
                         cur = c.load_settings()
                         cur["ZEDEDA_NODE_NEXT"] = str(number + 1)

@@ -285,7 +285,7 @@ Everything is configured in `.env`; [.env.example](.env.example) documents every
 
 - **`ENI_*`:** EVE Netboot Installer itself: image, language, boot menu, sync intervals, GitHub token.
 - **`EVE_*`:** EVE-OS: which releases are mirrored (`EVE_ARCHES`, `EVE_FLAVOURS`, `EVE_LTS_LINES`, `EVE_GITHUB_REPO`) and, as `EVE_DEFAULT_*`, the defaults of EVE-OS's own installation options (disk, controller, serial console, ...).
-- **VM appliance only:** the settings of the VM itself, such as its network, its DHCP service (`DHCP_*`) and ZEDEDA onboarding (`ZEDEDA_ONBOARDING`, `ZEDEDA_CLUSTER`, `ZEDEDA_LOGIN`, `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`, `ZEDEDA_PROJECT`, `ZEDEDA_ONBOARDING_KEY`, `ZEDEDA_NODE_NAME`, `ZEDEDA_NODE_NEXT`). There is no setting for the ZEDEDA password or session: those are never stored. See [vm/README.md: all settings](vm/README.md#10-all-settings).
+- **VM appliance only:** the settings of the VM itself, such as its network, its DHCP service (`DHCP_*`) and ZEDEDA onboarding (`ZEDEDA_ONBOARDING`, `ZEDEDA_CLUSTER`, `ZEDEDA_LOGIN`, `ZEDEDA_ENTERPRISE`, `ZEDEDA_USER`, `ZEDEDA_PROJECT`, `ZEDEDA_ACTIVATE`, `ZEDEDA_ONBOARDING_KEY`, `ZEDEDA_NODE_NAME`, `ZEDEDA_NODE_NEXT`). There is no setting for the ZEDEDA password or session: those are never stored. See [vm/README.md: all settings](vm/README.md#10-all-settings).
 - **Before 1.3** the `ENI_*` settings were called `EVE_*` as well (`EVE_LANGUAGE`, `EVE_MENU_MODE`, ...). The old names still work, and the sync log lists the ones still in use, so existing installations keep running after an update.
 
 The most important ones:
@@ -396,7 +396,7 @@ How the translations work:
 - **Integrity:** GitHub downloads are checked against the sha256 published with each release.
 - **ZEDEDA onboarding** (VM appliance):
   - The appliance logs in with an API token or a password; a password is used for the login only. The token or session is kept in the memory of the web management, never on disk, in exports, diagnostics or logs, and is gone after a restart.
-  - Use a ZEDEDA user only for this, with a role that may only create (and read) edge nodes, such as a custom role with *Edge Nodes: Create* and *Read*; add *Delete* only to delete nodes from the appliance. The session can do whatever that user can.
+  - Use a ZEDEDA user only for this, with a role that may only create (and read) edge nodes, such as a custom role with *Edge Nodes: Create* and *Read*, and the right to activate edge nodes for *Activate nodes* (on by default: a node that is not active cannot onboard); add *Delete* only to delete nodes from the appliance. The session can do whatever that user can.
   - Deleting nodes and the export need the admin login or the console. The list of onboarded machines on the VM holds no secrets.
   - The boot menu reaches the VM over plain HTTP (iPXE has no TLS), on the one path `/ipxe/onboard` of the management port. It can only create a node for a MAC address, once per MAC address, at most 60 per minute, and only while someone is logged in. Anyone in the boot network can send that request, so log out of ZEDEDA when the batch is installed.
 

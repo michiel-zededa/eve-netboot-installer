@@ -423,7 +423,9 @@ for which you have to know which soft serial ended up on which machine. Here:
    - a **role** for onboarding only: a custom role with **Edge Nodes: Create**
      and, preferably, **Edge Nodes: Read** (then a machine that is installed
      again is recognised instead of refused). Add **Edge Nodes: Delete** only
-     if you want to delete nodes from the appliance. Nothing else is needed;
+     if you want to delete nodes from the appliance. With *Activate nodes* on
+     (the default) the role must also be allowed to **activate** edge nodes.
+     Nothing else is needed;
    - a **user** only for this, with that role, and how the appliance logs in
      as that user: with an **API token** of the user (nothing else is needed,
      and it also works for single sign-on users), or with the user's
@@ -438,6 +440,10 @@ for which you have to know which soft serial ended up on which machine. Here:
    user and the enterprise then appear and are needed. When the role may not
    read projects, enter the project's ID instead of its name. The onboarding
    key is filled in with the default of the EVE-OS images from GitHub.
+   **Activate nodes** (on by default) activates every node right after it is
+   created: a node that is not active cannot onboard. If the role may not
+   activate nodes, the node is still created, the boot menu says *NOT
+   activated* and the list shows why; activate it in ZEDEDA by hand.
 3. Choose the **naming convention** of the nodes (*Node name*). A node cannot
    be renamed in ZEDEDA after it is created, so the name is fixed when the
    machine is installed:

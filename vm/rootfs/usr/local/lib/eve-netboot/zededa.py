@@ -178,6 +178,10 @@ class Client:
             "obkey": onboarding_key})
         return a.get("objectId", "")
 
+    def activate_device(self, node_id):
+        """Activate a node (a node created inactive cannot onboard); no change when it is active."""
+        self.call("PUT", "/v1/devices/id/" + urllib.parse.quote(node_id, safe="") + "/activate", ok=(200, 202, 204))
+
     def device_status(self, node_id):
         """-> {"run_state", "state", "last_seen", "eve", "error"}; state is one of
         waiting (the machine has not registered yet), starting, online (onboarded

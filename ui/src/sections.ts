@@ -140,6 +140,7 @@ export const SECTIONS: Section[] = [
         field(t, "ZEDEDA_ENTERPRISE", "text", { showIf: withPassword }),
         field(t, "ZEDEDA_USER", "text", { showIf: withPassword }),
         field(t, "ZEDEDA_PROJECT", "text", { showIf: on }),
+        field(t, "ZEDEDA_ACTIVATE", "yesno", { showIf: on }),
         field(t, "ZEDEDA_ONBOARDING_KEY", "text", { showIf: on }),
         field(t, "ZEDEDA_NODE_NAME", "text", { showIf: on, placeholder: "eve-{mac}" }),
         field(t, "ZEDEDA_NODE_NEXT", "number", { placeholder: "1",

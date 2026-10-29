@@ -116,7 +116,9 @@ and the UI type check + build.
   process's memory only: never in settings, exports, diagnostics, logs or API
   answers (tested). `/ipxe/onboard` is the only path served without TLS
   (`PlainHandler`); it may only create nodes. The role it needs: Edge Nodes
-  Create (+ Read; + Delete only for deleting); keep it working without Read
+  Create (+ Read; + activate for `ZEDEDA_ACTIVATE`, on by default: a node it
+  just created is activated, a failure leaves it created; + Delete only for
+  deleting); keep it working without Read
   and without reading projects. Node names: `{mac}`, `{serial}`, `{n}`/`{n:3}`
   (`ZEDEDA_NODE_NEXT`, taken only when a node is created), the machine list
   (`MACHINES`, CSV upload: name and project per MAC address or hardware

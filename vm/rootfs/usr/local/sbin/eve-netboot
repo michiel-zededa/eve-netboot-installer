@@ -94,7 +94,7 @@ VM_KEYS = {"HOSTNAME", "NET_MODE", "NET_INTERFACE", "NET_ADDRESS", "NET_GATEWAY"
            "DHCP_MODE", "DHCP_INTERFACE", "DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS",
            "DHCP_LEASE_TIME",
            "ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER",
-           "ZEDEDA_PROJECT", "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"}
+           "ZEDEDA_PROJECT", "ZEDEDA_ACTIVATE", "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"}
 # applied once and never stored
 CONSUMED = {"ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH", "SMB_PASSWORD"}
 # not in an export (secrets)
@@ -119,6 +119,7 @@ DEFAULTS = {
     "ZEDEDA_ONBOARDING": "no",
     "ZEDEDA_CLUSTER": "zedcontrol.zededa.net",
     "ZEDEDA_LOGIN": "token",
+    "ZEDEDA_ACTIVATE": "yes",
     "ZEDEDA_ONBOARDING_KEY": "5d0767ee-0547-4569-b530-387e526f8cb9",
     "ZEDEDA_NODE_NAME": "eve-{mac}",
     "ZEDEDA_NODE_NEXT": "1",
@@ -381,6 +382,8 @@ def zededa_problems(s):
     for k in ("ZEDEDA_ENTERPRISE", "ZEDEDA_USER", "ZEDEDA_PROJECT") if login == "password" else ("ZEDEDA_PROJECT",):
         if not get(s, k).strip():
             errors.append((k, tr("adm_err_zededa_empty", setting=label(k))))
+    if get(s, "ZEDEDA_ACTIVATE") not in ("yes", "no"):
+        errors.append(("ZEDEDA_ACTIVATE", tr("adm_err_yes_no", key="ZEDEDA_ACTIVATE")))
     if not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
                         get(s, "ZEDEDA_ONBOARDING_KEY")):
         errors.append(("ZEDEDA_ONBOARDING_KEY", tr("adm_err_zededa_key")))
@@ -1652,7 +1655,8 @@ FIELDS = {
     "DHCP_DNS": ("text", None), "DHCP_LEASE_TIME": ("text", None),
     "ZEDEDA_ONBOARDING": ("yesno", None), "ZEDEDA_CLUSTER": ("text", None),
     "ZEDEDA_LOGIN": ("choice", ["token", "password"]), "ZEDEDA_ENTERPRISE": ("text", None),
-    "ZEDEDA_USER": ("text", None), "ZEDEDA_PROJECT": ("text", None), "ZEDEDA_ONBOARDING_KEY": ("text", None),
+    "ZEDEDA_USER": ("text", None), "ZEDEDA_PROJECT": ("text", None), "ZEDEDA_ACTIVATE": ("yesno", None),
+    "ZEDEDA_ONBOARDING_KEY": ("text", None),
     "ZEDEDA_NODE_NAME": ("text", None), "ZEDEDA_NODE_NEXT": ("text", None),
 }
 SECTIONS = {
@@ -1669,7 +1673,7 @@ SECTIONS = {
                  "EVE_DEFAULT_NUKE_ALL_DISKS", "EVE_DEFAULT_EXTRA_ARGS"],
     "share": ["SMB_IMPORT_SHARE", "SMB_PASSWORD"],
     "zededa": ["ZEDEDA_ONBOARDING", "ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_ENTERPRISE", "ZEDEDA_USER",
-               "ZEDEDA_PROJECT",
+               "ZEDEDA_PROJECT", "ZEDEDA_ACTIVATE",
                "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME", "ZEDEDA_NODE_NEXT"],
     "access": ["WEB_ADMIN", "WEB_ADMIN_PORT", "SSH_PASSWORD_LOGIN", "ADMIN_SSH_KEYS", "TZ"],
 }
@@ -1683,7 +1687,8 @@ SHOWN_IF = {
     **{k: (lambda s: get(s, "DHCP_MODE") == "server")
        for k in ("DHCP_RANGE_START", "DHCP_RANGE_END", "DHCP_GATEWAY", "DHCP_DNS", "DHCP_LEASE_TIME")},
     **{k: (lambda s: get(s, "ZEDEDA_ONBOARDING") == "yes")
-       for k in ("ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_PROJECT", "ZEDEDA_ONBOARDING_KEY", "ZEDEDA_NODE_NAME")},
+       for k in ("ZEDEDA_CLUSTER", "ZEDEDA_LOGIN", "ZEDEDA_PROJECT", "ZEDEDA_ACTIVATE", "ZEDEDA_ONBOARDING_KEY",
+                 "ZEDEDA_NODE_NAME")},
     **{k: (lambda s: get(s, "ZEDEDA_ONBOARDING") == "yes" and get(s, "ZEDEDA_LOGIN") == "password")
        for k in ("ZEDEDA_ENTERPRISE", "ZEDEDA_USER")},
     "ZEDEDA_NODE_NEXT": lambda s: (get(s, "ZEDEDA_ONBOARDING") == "yes" and

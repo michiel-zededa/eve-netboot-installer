@@ -368,6 +368,7 @@ export default function ZededaSession() {
                         </span>
                       )}
                       {n.result === "failed" && <div className="small err-text">{n.message}</div>}
+                      {n.result !== "failed" && n.message && <div className="small warn-text">{n.message}</div>}
                       {n.result !== "failed" && n.result !== "deleted" && (
                         <>
                           {(n.online_since || n.status?.eve) && (

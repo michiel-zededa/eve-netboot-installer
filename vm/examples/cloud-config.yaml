@@ -76,6 +76,7 @@ eve_netboot:
   # ZEDEDA_ENTERPRISE: my-enterprise
   # ZEDEDA_USER: eve-netboot-onboarding
   # ZEDEDA_PROJECT: netboot
+  # ZEDEDA_ACTIVATE: "yes"              # activate the nodes it creates
   # ZEDEDA_ONBOARDING_KEY: 5d0767ee-0547-4569-b530-387e526f8cb9
   # ZEDEDA_NODE_NAME: eve-{mac}       # or bench1-node-{n:3}
   # ZEDEDA_NODE_NEXT: 1

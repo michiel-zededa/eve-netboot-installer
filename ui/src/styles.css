@@ -415,6 +415,7 @@ input:focus, textarea:focus, select:focus { outline: 0; border-color: var(--acce
 .field-label { font-size: 13px; font-weight: 600; color: var(--text); }
 .field-help { font-size: 13px; color: var(--muted); }
 .err-text { color: var(--err); }
+.warn-text { color: var(--warn); }
 .ok-text { color: var(--ok); vertical-align: -3px; }
 .checks { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
 .check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
