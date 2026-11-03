@@ -358,6 +358,8 @@ class WebTest(WebBase):
         self.login()
         status, text, _ = self.request("GET", "/api/logs?source=sync&lines=50")
         self.assertEqual((status, text), (200, b"sync log\n"))
+        # a log that is read is not copied into the appliance's log (the Logs page reads every 5 s)
+        self.assertTrue(self.mocks["compose"].call_args.kwargs.get("quiet"))
         self.assertEqual(self.request("GET", "/api/logs?source=/etc/shadow")[0], 400)
         status, text, _ = self.request("GET", "/api/export")
         self.assertIn(b"ENI_LANGUAGE=nl", text)

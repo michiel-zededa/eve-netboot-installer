@@ -1223,13 +1223,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         c = self.core
         lines = max(10, min(lines, 5000))
         if source in ("sync", "tftp", "web"):
-            p = c.compose("logs", "--no-color", "--tail", str(lines), source, check=False)
+            # quiet: a log that is read is not written to the appliance's log again
+            p = c.compose("logs", "--no-color", "--tail", str(lines), source, check=False, quiet=True)
             # compose still writes terminal control codes (e.g. "erase line")
             return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stdout + p.stderr)
         if source == "dhcp":
             return c.dhcp_log(lines)
         if source == "appliance":
-            text = c.read(c.LOG)
+            text = c.read_tail(c.LOG, lines * 400)
             return "\n".join(text.splitlines()[-lines:]) + "\n"
         if source == "system":
             p = c.run(["journalctl", "--no-pager", "-n", str(lines), "-u", "eve-netboot-setup",
@@ -1289,7 +1290,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         files = {
             "status.txt": "\n".join(c.status_lines()) + "\n",
             "settings-export.txt": c.render_export(c.load_settings()),
-            "appliance.log": c.read(c.LOG),
+            "appliance.log": c.read_tail(c.LOG, 4 << 20),
             "sync.log": self.logs("sync", 2000),
             "tftp.log": self.logs("tftp", 500),
             "web.log": self.logs("web", 500),

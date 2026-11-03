@@ -716,6 +716,8 @@ the default value. Both work as they are, as cloud-init user-data:
 
 | Symptom | Check |
 |---|---|
+| The sync log says *GitHub's address could not be resolved* (older versions: *\[Errno -3\] Try again*) | The VM cannot look up names. With a fixed address, check the DNS server under *Network* (`NET_DNS`) and that the VM can reach it; with DHCP, the DNS server your DHCP server hands out. A network that reaches the internet only through a proxy is not supported yet. The VM retries every hour. |
+| *Download diagnostics* fails (*Check internet connection* in Chrome), up to 1.8.1 | The appliance log had grown very large (every refresh of the *Logs* page copied the logs into it). Later versions keep it small; on 1.8.1 or older: `sudo truncate -s 0 /var/log/eve-netboot.log`, then download again. |
 | The VM screen stays black | ZEDEDA / Proxmox: the VM needs a VGA/virtual display; the setup runs on the first screen (tty1). |
 | *Starting, please wait* for a long time | The first boot applies the settings and starts the services; give it 2-3 minutes. After 15 minutes the screen continues anyway; *Last error* on the status screen says what went wrong. |
 | The setup appears although you passed cloud-init settings | The settings were not recognised: plain `KEY=VALUE` lines, or a `#cloud-config` with an `eve_netboot:` section. A file that starts with `#!` (a script) is not read. |

@@ -29,6 +29,8 @@ import json
 import os
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -190,6 +192,20 @@ class _RedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _opener = urllib.request.build_opener(_RedirectHandler)
+
+
+def network_problem(e):
+    """One line for a failure to reach GitHub (DNS, connection, timeout), or ""
+    when e is something else."""
+    reason = getattr(e, "reason", None) if isinstance(e, urllib.error.URLError) else e
+    if isinstance(e, urllib.error.HTTPError):
+        return ""
+    if isinstance(reason, socket.gaierror):
+        return (f"GitHub's address could not be resolved ({reason.strerror or reason}): check the DNS "
+                "server of this host (and of Docker), or whether it reaches the internet only through a proxy")
+    if isinstance(reason, (TimeoutError, ConnectionError, OSError)) and not isinstance(reason, ssl.SSLError):
+        return f"no connection to GitHub ({reason}): check this host's internet access"
+    return ""
 
 
 def http_get(url, accept=None):
@@ -1349,8 +1365,10 @@ def main():
                     # ENI_SYNC_INTERVAL=0: GitHub only at start, the import folder is still watched
                     next_gh = time.time() + SYNC_INTERVAL if SYNC_INTERVAL > 0 else float("inf")
                 except Exception as e:  # noqa: BLE001
-                    log(f"GitHub sync failed: {e}; retry in 1h")
-                    traceback.print_exc()
+                    reason = network_problem(e)
+                    log(f"GitHub sync failed: {reason or e}; retry in 1h")
+                    if not reason:                # a network problem needs no traceback
+                        traceback.print_exc()
                     next_gh = time.time() + 3600
             write_menus()
             NEXT_GITHUB_CHECK = (None if next_gh == float("inf") else

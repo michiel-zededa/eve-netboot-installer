@@ -307,6 +307,22 @@ class DefaultsTest(unittest.TestCase):
             self.assertIn(key, app.DEFAULTS)
 
 
+class LogTest(unittest.TestCase):
+
+    def test_the_log_trims_itself(self):
+        path = os.path.join(tempfile.mkdtemp(), "eve-netboot.log")
+        with unittest.mock.patch.object(app, "LOG", path), unittest.mock.patch.object(app, "LOG_MAX", 10000):
+            for i in range(2000):
+                app.append_log(f"line {i}\n")
+            size = os.path.getsize(path)
+            self.assertLessEqual(size, 10000)
+            text = app.read(path)
+            self.assertTrue(text.endswith("line 1999\n"))
+            self.assertTrue(text.startswith("line "))             # cut at a line start
+            self.assertEqual(app.read_tail(path, 20), "line 1998\nline 1999\n")
+            self.assertEqual(app.read_tail(path + "-missing", 20), "")
+
+
 class VersionTest(unittest.TestCase):
 
     def test_version_tuple(self):

@@ -61,6 +61,7 @@ DATA = "/srv/eve-netboot"
 IMPORT = os.path.join(DATA, "import")
 WWW = os.path.join(DATA, "www")
 LOG = "/var/log/eve-netboot.log"
+LOG_MAX = 8 << 20          # the log keeps its newest half when it grows past this
 LOCK = "/run/eve-netboot.lock"
 # ZEDEDA onboarding: the machines the web management onboarded (no secrets), and
 # the key with which the console may use the web management's ZEDEDA session
@@ -647,18 +648,46 @@ def userdata_digest(text):
 def log(msg):
     line = f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
     print(line, flush=True)
+    append_log(line + "\n")
+
+
+def append_log(text):
+    """Append to the appliance's log; past LOG_MAX only its newest half is kept
+    (nothing rotates it, and a VM runs for months)."""
     try:
         with open(LOG, "a") as f:
-            f.write(line + "\n")
+            f.write(text)
+            size = f.tell()
+        if size > LOG_MAX:
+            with open(LOG, "rb") as f:
+                f.seek(-(LOG_MAX // 2), os.SEEK_END)
+                keep = f.read()
+            keep = keep[keep.find(b"\n") + 1:]
+            with open(LOG, "wb") as f:
+                f.write(keep)
     except OSError:
         pass
+
+
+def read_tail(path, size):
+    """The last `size` bytes of a file, from a line start ("" when it is missing)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            start = max(0, f.tell() - size - 1)      # one byte more: is the window at a line start?
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return ""
+    if start > 0:
+        data = data[data.find(b"\n") + 1:]
+    return data.decode(errors="replace")
 
 
 def run(cmd, check=True, quiet=False, **kw):
     p = subprocess.run(cmd, capture_output=True, text=True, **kw)
     if not quiet and (p.stdout.strip() or p.stderr.strip()):
-        with open(LOG, "a") as f:
-            f.write(f"$ {' '.join(cmd)}\n{p.stdout}{p.stderr}")
+        append_log(f"$ {' '.join(cmd)}\n{p.stdout}{p.stderr}")
     if check and p.returncode != 0:
         raise RuntimeError(f"{' '.join(cmd)} failed: {(p.stderr or p.stdout).strip()[-300:]}")
     return p

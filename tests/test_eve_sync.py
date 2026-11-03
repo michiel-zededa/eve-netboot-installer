@@ -317,6 +317,23 @@ class MainLoopTest(unittest.TestCase):
         self.assertEqual(m["sync_github"].call_count, 1)
         self.assertEqual(m["sync_local"].call_count, 3)
 
+    def test_no_dns_is_one_clear_line(self):
+        gai = eve_sync.urllib.error.URLError(eve_sync.socket.gaierror(-3, "Try again"))
+        with mock.patch.multiple(eve_sync, SYNC_INTERVAL=86400, sync_local=mock.Mock(return_value=False),
+                                 sync_github=mock.Mock(side_effect=gai), write_menus=mock.DEFAULT,
+                                 log=mock.DEFAULT) as m, \
+                mock.patch.object(eve_sync.time, "sleep", side_effect=StopLoop), \
+                mock.patch.object(eve_sync.traceback, "print_exc") as tb, \
+                mock.patch.object(eve_sync.shutil, "which", return_value="/usr/bin/bsdtar"), \
+                mock.patch.object(sys, "argv", ["eve_sync.py"]):
+            with self.assertRaises(StopLoop):
+                eve_sync.main()
+        line = next(str(c.args[0]) for c in m["log"].call_args_list if "GitHub sync failed" in str(c.args[0]))
+        self.assertIn("could not be resolved (Try again): check the DNS server", line)
+        tb.assert_not_called()
+        self.assertEqual(eve_sync.network_problem(ValueError("x")), "")
+        self.assertEqual(eve_sync.network_problem(eve_sync.urllib.error.HTTPError("u", 500, "x", {}, None)), "")
+
     def test_interval(self):
         m = self.run_loop(86400)
         self.assertEqual(m["sync_github"].call_count, 1)
