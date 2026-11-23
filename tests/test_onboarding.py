@@ -214,9 +214,44 @@ class MenuTest(unittest.TestCase):
         rel = re.findall(r"set eve_title EVE-OS (\S+) .*?\nset eve_rel_ok (\d)", m, re.S)
         self.assertEqual(rel, [("16.0.4-lts", "0"), ("17.0.0-lts", "1")])
         check = m[m.index("set eve_ob_do 0"):m.index(":eve_ob_checked")]
-        self.assertTrue(check.startswith("set eve_ob_do 0\nclear eve_ob_s\niseq ${eve_rel_ok} 1 || goto eve_ob_checked"))
+        self.assertTrue(check.startswith("set eve_ob_do 0\nclear eve_ob_s\nclear eve_ob_s2\n"
+                                         "iseq ${eve_rel_ok} 1 || goto eve_ob_checked"))
         # the soft serial (the MAC address) is what ZEDEDA matches on
         self.assertIn("iseq ${eve_softserial} 1 || goto eve_ob_checked", check)
+
+    def test_summary_lines_fit_the_menu(self):
+        """iPXE cuts a menu item off at 74 columns: the summary shows each option
+        on its own line and wraps the ZEDEDA status onto a second line."""
+        m = self.render("http://192.0.2.20:8443/ipxe/onboard")
+        confirm = m[m.index(":eve_confirm_ob"):m.index(":eve_boot\n")]
+        self.assertIn("item --gap Options: ${eve_o1}", confirm)
+        self.assertNotIn("${eve_opts}", confirm)
+        n = len(eve_sync.INSTALL_OPTS)
+        for i in range(n):
+            self.assertIn(f"isset ${{eve_oc{i}}} && item --gap ${{eve_ind_o}}${{eve_oc{i}}} ||", confirm)
+        self.assertIn("isset ${eve_ob_s2} && item --gap ${eve_ind_ob}${eve_ob_s2} ||", confirm)
+        # the indents line up under the value: "Options: " and "ZEDEDA node: "
+        self.assertIn("set eve_ind_o:hex " + ":".join(["20"] * len("Options: ")), m)
+        self.assertIn("set eve_ind_ob:hex " + ":".join(["20"] * len("ZEDEDA node: ")), m)
+        # the first option set goes next to the label, and not again below it
+        setup = m[m.index("clear eve_o1\n"):m.index("set eve_ob_do 0")]
+        self.assertLess(setup.index("&& set eve_o1n 7 ||"), setup.index("&& set eve_o1n 0 ||"))  # the first wins
+        self.assertIn("isset ${eve_o1n} && clear eve_oc${eve_o1n} ||", setup)
+        # the kernel line gets every option from the same list
+        for cond, arg in eve_sync.INSTALL_OPTS:
+            self.assertIn(f"{cond} && set eve_opts ${{eve_opts}} {arg} ||", m)
+        # the menu's own texts are wrapped when they are set
+        width = eve_sync.MENU_TEXT_COLS - len("ZEDEDA node: ")
+        for line in re.findall(r"set eve_ob_s2? (.*?)(?: \|\|)?$", m, re.M):
+            self.assertLessEqual(len(line), width, line)
+
+    def test_split_two(self):
+        self.assertEqual(eve_sync.split_two("short text", 20, 20), ("short text", ""))
+        self.assertEqual(eve_sync.split_two("registered as bench1-node-004 in project onboarding, NOT activated", 40, 40),
+                         ("registered as bench1-node-004 in project", "onboarding, NOT activated"))
+        one, two = eve_sync.split_two("word " * 40, 20, 20)
+        self.assertTrue(two.endswith("...") and len(one) <= 20 and len(two) <= 20)
+        self.assertEqual(eve_sync.split_two("averyveryverylongword", 8, 8), ("avery...", ""))
 
     def test_unsafe_url_is_ignored(self):
         self.assertEqual(eve_sync.release_major({"tag": "17.0.0-lts"}), 17)

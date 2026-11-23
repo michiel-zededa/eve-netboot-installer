@@ -301,6 +301,28 @@ class App:
 # --------------------------------------------------------------------------
 # request handling
 # --------------------------------------------------------------------------
+# iPXE draws a menu item in 74 columns (as app/eve_sync.py)
+MENU_TEXT_COLS = 74
+
+
+def split_two(text, first, rest):
+    """Word-wrap text into two lines of first and rest columns (the second empty
+    when it fits on one); what does not fit ends in '...'. As app/eve_sync.py."""
+    lines, width = [""], first
+    for w in str(text).split():
+        cur = lines[-1]
+        if len(cur) + len(w) + (1 if cur else 0) <= width:
+            lines[-1] = f"{cur} {w}" if cur else w
+        elif len(lines) == 1 and cur:
+            lines.append(w)
+            width = rest
+        else:                                   # does not fit: cut off, marked
+            lines[-1] = (f"{cur} {w}" if cur else w)[:width - 3].rstrip() + "..."
+            break
+    lines = [ln[:first] for ln in lines[:1]] + [ln[:rest] for ln in lines[1:]]
+    return lines[0], (lines[1] if len(lines) > 1 else "")
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "eve-netboot-web"
     app: App = None  # set in serve()
@@ -957,7 +979,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def ipxe_onboard(self, query):
         """GET /ipxe/onboard?action=preview|register&mac=&serial=&product=
         (plain HTTP, from the boot menu). Answers an iPXE script that sets
-        eve_ob_ok (1/0) and eve_ob_s (one line of text for the summary)."""
+        eve_ob_ok (1/0) and eve_ob_s + eve_ob_s2: the text for the summary, in
+        two lines that fit next to its label (iPXE cuts a menu item off)."""
         c = self.core
         q = {k: (v[0] if v else "") for k, v in query.items()}
         action = q.get("action", "preview")
@@ -967,8 +990,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         def answer(ok, text):
             safe = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode()
             safe = re.sub(r"[^A-Za-z0-9 .,:;()/@_+'-]", " ", safe)
-            safe = re.sub(r"\s+", " ", safe).strip()[:120] or "-"
-            self.send(200, f"#!ipxe\nset eve_ob_ok {1 if ok else 0}\nset eve_ob_s {safe}\n", "text/plain")
+            safe = re.sub(r"\s+", " ", safe).strip()[:140] or "-"
+            # the summary's line "ZEDEDA node: ..." (one column spare: the menu's
+            # ASCII form of a label can be a letter longer)
+            width = MENU_TEXT_COLS - len(c.tr("conf_onboard")) - 3
+            one, two = split_two(safe, width, width)
+            second = f"set eve_ob_s2 {two}" if two else "clear eve_ob_s2"
+            self.send(200, f"#!ipxe\nset eve_ob_ok {1 if ok else 0}\nset eve_ob_s {one}\n{second}\n", "text/plain")
 
         if c.get(s, "ZEDEDA_ONBOARDING") != "yes":
             return answer(False, c.tr("adm_zo_off"))

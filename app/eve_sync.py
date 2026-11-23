@@ -787,6 +787,69 @@ def fill(template, extra=None):
     return re.sub(r"@@(\w+)@@", lambda m: ascii_text(values[m.group(1)]), template)
 
 
+# iPXE draws a menu item in 74 columns (an 80 column console: the menu box, its
+# border and padding); longer item text is cut off at the right
+MENU_TEXT_COLS = 74
+
+
+def split_two(text, first, rest):
+    """Word-wrap text into two lines of first and rest columns (the second empty
+    when it fits on one); what does not fit ends in '...'."""
+    lines, width = [""], first
+    for w in str(text).split():
+        cur = lines[-1]
+        if len(cur) + len(w) + (1 if cur else 0) <= width:
+            lines[-1] = f"{cur} {w}" if cur else w
+        elif len(lines) == 1 and cur:
+            lines.append(w)
+            width = rest
+        else:                                   # does not fit: cut off, marked
+            lines[-1] = (f"{cur} {w}" if cur else w)[:width - 3].rstrip() + "..."
+            break
+    lines = [ln[:first] for ln in lines[:1]] + [ln[:rest] for ln in lines[1:]]
+    return lines[0], (lines[1] if len(lines) > 1 else "")
+
+
+def spaces_hex(n):
+    """iPXE joins a command's arguments with one space: an indent needs a variable."""
+    return ":".join(["20"] * max(n, 1))
+
+
+# the installation options (kernel arguments) in the order of the kernel line:
+# (condition, argument); the summary shows each on its own line
+INSTALL_OPTS = (("iseq ${eve_reboot} 1", "eve_reboot_after_install"),
+                ("iseq ${eve_softserial} 1", "eve_soft_serial=${mac:hexhyp}"),
+                ("isset ${eve_disk}", "eve_install_disk=${eve_disk}"),
+                ("isset ${eve_persist}", "eve_persist_disk=${eve_persist}"),
+                ("isset ${eve_server}", "eve_install_server=${eve_server}"),
+                ("iseq ${eve_nuke} 1", "eve_nuke_all_disks"),
+                ("iseq ${eve_pause} 1", "eve_pause_before_install"),
+                ("iseq ${eve_debug} 1", "eve_install_debug=true linuxkit.runc_console=1"))
+
+
+def opts_lines_setup():
+    """iPXE lines for the summary's options, one per line: eve_o1 is the first
+    option (next to the label), eve_oc<i> each further one (empty when off)."""
+    lines = ["clear eve_o1", "clear eve_o1n"]
+    for i, (cond, arg) in enumerate(INSTALL_OPTS):
+        lines += [f"clear eve_oc{i}", f"{cond} && set eve_oc{i} {arg} ||"]
+    for i, (cond, arg) in reversed(list(enumerate(INSTALL_OPTS))):  # the last set wins: the first
+        lines.append(f"{cond} && set eve_o1n {i} ||")
+        lines.append(f"{cond} && set eve_o1 {arg} ||")
+    lines.append("isset ${eve_o1n} && clear eve_oc${eve_o1n} ||")
+    return lines
+
+
+def ob_set(key, pre="", post=""):
+    """iPXE lines that set eve_ob_s (+ eve_ob_s2) to a translated ZEDEDA status,
+    wrapped to fit the summary next to its label; pre/post: the condition."""
+    label = len(ascii_text(T["conf_onboard"])) + 2
+    one, two = split_two(ascii_text(T[key]), MENU_TEXT_COLS - label, MENU_TEXT_COLS - label)
+    lines = [f"{pre}set eve_ob_s {one}{post}"]
+    lines.append(f"{pre}set eve_ob_s2 {two}{post}" if two else f"{pre}clear eve_ob_s2{post}")
+    return lines
+
+
 def render_menu(entries, github_checked):
     """No timestamps of its own: the output only changes when the content does."""
     gh = [e for e in entries if e.get("source") == "github"]
@@ -804,6 +867,11 @@ def render_menu(entries, github_checked):
     a(f"set eve_base {BASE_URL}/eve")
     a("set eve_sp:hex 20:20")
     a("set eve_sp ${eve_sp:string}")
+    # the indents of the summary's next lines: under the value after "Options: "
+    # and "ZEDEDA node: "
+    for var, key in (("eve_ind_o", "conf_options"), ("eve_ind_ob", "conf_onboard")):
+        a(f"set {var}:hex {spaces_hex(len(ascii_text(T[key])) + 2)}")
+        a(f"set {var} ${{{var}:string}}")
     a("set eve_esc:hex 1b")
     a("set eve_esc ${eve_esc:string}")
     a("")
@@ -931,23 +999,28 @@ def onboard_parts(template):
     images of EVE-OS 17.0.0-lts or later (eve_rel_ok): their summary becomes a
     small menu with the ZEDEDA line and the option Onboard in ZEDEDA [o];
     the summary of every other image stays as it is."""
-    parts = {"#@ONBOARD_CHECK": "", "#@ONBOARD_CONFIRM": "", "#@ONBOARD_REGISTER": ""}
+    parts = {"#@ONBOARD_CHECK": "", "#@ONBOARD_CONFIRM": "", "#@ONBOARD_REGISTER": "",
+             # the kernel arguments of the installation options
+             "#@INSTALL_OPTS": "\n".join(f"{cond} && set eve_opts ${{eve_opts}} {arg} ||"
+                                         for cond, arg in INSTALL_OPTS)}
     if ONBOARD_URL:
         url = ONBOARD_URL + "?action="
         parts.update({
             # whether this installation will be onboarded: asks the boot server
             "#@ONBOARD_CHECK": "\n".join([
+                *opts_lines_setup(),
                 "set eve_ob_do 0",
                 "clear eve_ob_s",
+                "clear eve_ob_s2",
                 "iseq ${eve_rel_ok} 1 || goto eve_ob_checked",
                 # wipe all disks installs nothing: no node for it
-                "iseq ${eve_nuke} 1 && set eve_ob_s @@ob_nothing_installed@@ ||",
+                *ob_set("ob_nothing_installed", "iseq ${eve_nuke} 1 && ", " ||"),
                 "isset ${eve_ob_s} && goto eve_ob_checked ||",
-                "iseq ${eve_softserial} 1 || set eve_ob_s @@ob_needs_soft@@",
+                *ob_set("ob_needs_soft", "iseq ${eve_softserial} 1 || "),
                 "iseq ${eve_softserial} 1 || goto eve_ob_checked",
                 "iseq ${eve_onboard} 1 || goto eve_ob_checked",
                 "set eve_ob_ok 0",
-                "set eve_ob_s @@ob_unreachable@@",
+                *ob_set("ob_unreachable"),
                 f"chain --autofree {url}preview&{ONBOARD_QUERY} ||",
                 "iseq ${eve_ob_ok} 1 && set eve_ob_do 1 ||",
                 ":eve_ob_checked",
@@ -960,11 +1033,14 @@ def onboard_parts(template):
                 "menu ${eve_title}",
                 "item --gap @@conf_source@@: ${eve_dir}/",
                 "item --gap ISO: @@conf_iso_ram@@",
-                "item --gap @@conf_options@@: ${eve_opts}",
+                "item --gap @@conf_options@@: ${eve_o1}",
+                *(f"isset ${{eve_oc{i}}} && item --gap ${{eve_ind_o}}${{eve_oc{i}}} ||"
+                  for i in range(len(INSTALL_OPTS))),
                 "isset ${eve_conx} && item --gap @@conf_console@@: ${eve_con} ${eve_conx} ||",
                 "isset ${eve_extra} && item --gap @@conf_extra@@: ${eve_extra} ||",
                 "iseq ${eve_k} 1 && item --gap @@conf_note@@: @@conf_k_warn@@ ||",
                 "isset ${eve_ob_s} && item --gap @@conf_onboard@@: ${eve_ob_s} ||",
+                "isset ${eve_ob_s2} && item --gap ${eve_ind_ob}${eve_ob_s2} ||",
                 "item --gap",
                 "iseq ${eve_nuke} 1 || item --gap @@conf_wipe_warn@@",
                 "iseq ${eve_nuke} 1 && item --gap @@conf_nuke_warn@@ ||",
@@ -993,10 +1069,10 @@ def onboard_parts(template):
                 "echo ${cls}",
                 "echo @@boot_onboard@@",
                 "set eve_ob_ok 0",
-                "set eve_ob_s @@ob_unreachable@@",
+                *ob_set("ob_unreachable"),
                 f"chain --autofree {url}register&{ONBOARD_QUERY} ||",
-                "iseq ${eve_ob_ok} 1 && echo  ${eve_ob_s} ||",
-                "iseq ${eve_ob_ok} 1 || echo  ${eve_esc}[31m${eve_ob_s}${eve_esc}[37m",
+                "iseq ${eve_ob_ok} 1 && echo  ${eve_ob_s} ${eve_ob_s2} ||",
+                "iseq ${eve_ob_ok} 1 || echo  ${eve_esc}[31m${eve_ob_s} ${eve_ob_s2}${eve_esc}[37m",
                 "iseq ${eve_ob_ok} 1 || prompt @@ob_continue@@ ||",
                 ":eve_ob_done"]),
         })
@@ -1096,14 +1172,7 @@ goto eve_defaults
 :eve_confirm
 iseq ${eve_netboot} 1 || goto eve_err_netboot
 clear eve_opts
-iseq ${eve_reboot} 1 && set eve_opts ${eve_opts} eve_reboot_after_install ||
-iseq ${eve_softserial} 1 && set eve_opts ${eve_opts} eve_soft_serial=${mac:hexhyp} ||
-isset ${eve_disk} && set eve_opts ${eve_opts} eve_install_disk=${eve_disk} ||
-isset ${eve_persist} && set eve_opts ${eve_opts} eve_persist_disk=${eve_persist} ||
-isset ${eve_server} && set eve_opts ${eve_opts} eve_install_server=${eve_server} ||
-iseq ${eve_nuke} 1 && set eve_opts ${eve_opts} eve_nuke_all_disks ||
-iseq ${eve_pause} 1 && set eve_opts ${eve_opts} eve_pause_before_install ||
-iseq ${eve_debug} 1 && set eve_opts ${eve_opts} eve_install_debug=true linuxkit.runc_console=1 ||
+#@INSTALL_OPTS
 clear eve_conx
 iseq ${eve_serial} none || set eve_conx console=${eve_serial},115200n8
 #@ONBOARD_CHECK

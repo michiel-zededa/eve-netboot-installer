@@ -485,7 +485,14 @@ class ZededaWebTest(WebBase):
         body = r.read().decode()
         self.assertEqual(r.status, 200, body)
         self.assertTrue(body.startswith("#!ipxe\n") and body.isascii(), body)
-        return dict(re.findall(r"^set (eve_ob_\w+) (.*)$", body, re.M))
+        ob = dict(re.findall(r"^set (eve_ob_\w+) (.*)$", body, re.M))
+        # two lines that fit next to "ZEDEDA node: " in iPXE's 74 columns
+        self.assertTrue(("set eve_ob_s2 " in body) != ("clear eve_ob_s2" in body), body)
+        for key in ("eve_ob_s", "eve_ob_s2"):
+            self.assertLessEqual(len(ob.get(key, "")), 74 - len("ZEDEDA node: "), body)
+        if "eve_ob_s2" in ob:                       # the tests check the whole text
+            ob["eve_ob_s"] += " " + ob.pop("eve_ob_s2")
+        return ob
 
     def start_tls(self):
         p = mock.patch.object(web, "TLS_DIR", tempfile.mkdtemp(dir=TMP))
