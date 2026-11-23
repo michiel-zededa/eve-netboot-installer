@@ -84,7 +84,7 @@ All taken in a documentation network (`192.0.2.0/24`).
 | | |
 |---|---|
 | **Always current** | Mirrors the newest patch release of the newest *N* EVE-OS **LTS** lines from GitHub, for `amd64`/`arm64` and the `kvm`/`k` variants. It verifies every download against its sha256 and removes releases you no longer need. |
-| **Bring your own installer** | Every EVE installer ISO (volume id `EVEISO`) in the import folder appears in the menu within a minute. This includes controller-specific builds with onboarding certificates in `config.img`. |
+| **Bring your own installer** | Every EVE installer ISO (volume id `EVEISO`) in the import folder appears in the menu within a minute. This includes controller-specific builds with onboarding certificates in `config.img`, and ISOs saved by [EVE Imager](#device-configuration-with-eve-imager) with network, WiFi, proxy and certificate settings. |
 | **All installer options at boot** | Set them at boot: target disk, persist disk(s), controller (`eve_install_server`), serial console, soft serial, reboot after install, wipe all disks (EVE-OS then wipes every disk and powers off without installing), debug/pause, and extra kernel arguments. Defaults come from `.env`. |
 | **Safe by default** | A summary screen requires an explicit **`i`** before installing. Without input, the menu falls back to the local disk after a timeout, so a machine that PXE boots by accident never stalls. |
 | **Own iPXE build** | iPXE (x86_64 and arm64 UEFI) is compiled from the official sources during the image build. Only two DHCP options are needed, with no other boot infrastructure. |
@@ -346,6 +346,62 @@ Drop an EVE installer ISO, or an `*installer-net.tar`, anywhere below `IMPORT_DI
 - **Changes:** replacing or deleting the file updates the menu as well.
 - **Version and variant:** read from the ISO itself (`/etc/eve-release` in its installer root file system), so the menu and the UI show the EVE-OS version instead of only the file name. If that cannot be read, the file name decides: a `k` or `kubevirt` token (for example `installer.k.iso`) means `k`, anything else `kvm`.
 
+### Device configuration with EVE Imager
+
+The boot menu sets the **installation options**: they are kernel arguments,
+which EVE-OS's installer reads at boot. Everything else EVE-OS reads from its
+configuration file system, which an installer ISO carries as `config.img`:
+network settings, WiFi, proxy, certificates. The netboot installer has no
+fields for those. To set them, make the ISO with
+[EVE Imager](https://github.com/michiel-zededa/eve-imager), which writes them
+into the ISO's `config.img`, and serve that ISO from the import folder.
+
+**Download EVE Imager:** [latest release](https://github.com/michiel-zededa/eve-imager/releases/latest)
+for Windows, macOS and Linux. Saving an installer ISO with its configuration
+needs EVE Imager 2.1.0 or later.
+
+What goes where: the device configuration (controller, network, WiFi, proxy,
+certificates, SSH key) is set in EVE Imager and travels in the ISO; the
+installation options (disks, wiping, reboot, soft serial, console, extra
+kernel arguments) and ZEDEDA onboarding are set in the boot menu here.
+
+1. Save the installer ISO with its configuration in EVE Imager, as described in
+   its README:
+   [Using the ISO with EVE Netboot Installer](https://github.com/michiel-zededa/eve-imager#using-the-iso-with-eve-netboot-installer).
+2. Copy the ISO into the import folder: on the VM appliance, upload it in the
+   web management or copy it to the SMB share. Give it a name that says what it
+   is for (`eve-17.0.1-site-amsterdam.iso`): the menu shows the file name next
+   to the version.
+3. Network boot the machine and choose that ISO under *Local installers*. The
+   installer copies the ISO's configuration onto the disk, and EVE-OS uses it at
+   its first boot.
+
+Notes:
+
+- **Controller: leave it empty here,** or set the same one. The installer first
+  copies the ISO's configuration and then writes the boot menu's controller
+  over it, so a different value here silently replaces the controller set in
+  EVE Imager. On the VM appliance it is *Installer defaults → Controller*;
+  with Docker Compose `EVE_DEFAULT_INSTALL_SERVER`; for one machine, clear
+  *Controller* under *Installation options...* in the boot menu, which then
+  shows *Controller: from ISO*.
+- **One ISO per configuration:** another site, network or proxy is another ISO,
+  and another entry in the menu. For a new EVE-OS release, save a new ISO with
+  EVE Imager: the releases mirrored from GitHub carry none of these settings.
+- **Disk space:** about 0.5 GB per ISO for `kvm` and 1 GB for `k`, twice over:
+  the file in the import folder and the copy the netboot installer prepares
+  from it.
+- **Secrets:** WiFi passwords, onboarding keys and the rest of `config.img` can
+  be downloaded by anyone on the boot network, like any ISO served here.
+- **ZEDEDA onboarding** works for such an ISO as for any other (EVE-OS 17 and
+  later). The node's serial is still the MAC address from the boot menu.
+- EVE-OS uses the network settings only to come online and onboard; after that
+  the controller's network configuration takes over.
+- **Not yet confirmed on a real device:** a network boot of an ISO with a
+  `config.img` changed by EVE Imager. The netboot installer leaves `config.img`
+  inside the ISO, where EVE Imager puts it, so it is expected to work; check
+  the first machine before installing a batch.
+
 ## Operation
 
 On the VM appliance all of this is in its console menu and web management: logs, *Check GitHub now*, *Update EVE Netboot Installer* (with rollback) and automatic security updates ([vm/README.md: daily use](vm/README.md#6-daily-use)). Its web management and console menu also have *ZEDEDA onboarding*: the login to ZEDEDA, the list of onboarded machines, its CSV export and import, removing entries and deleting nodes. With Docker Compose:
@@ -389,7 +445,7 @@ How the translations work:
 
 - **No authentication:**
   - PXE, TFTP and the HTTP mirror are unauthenticated by design. Run the server in a trusted network or VLAN.
-  - Installer ISOs in the import folder may contain controller onboarding certificates, and anyone on that network can download them.
+  - Installer ISOs in the import folder may contain controller onboarding certificates and, when made with EVE Imager, WiFi passwords; anyone on that network can download them.
 - **Disk wiping:**
   - Installing EVE erases disks. Keep network boot below the local disk in the boot order of production machines, or rely on the menu timeout ([boot order](docs/boot-order.md)).
   - The stack never installs without an explicit key press.
@@ -404,7 +460,8 @@ How the translations work:
 
 - **UEFI only:** legacy BIOS PXE is not supported.
 - **Boot file per architecture:** a DHCP server that hands out one boot file to all clients gives arm64 machines the x86 binary. Use per-architecture DHCP rules (see [docs/dhcp.md](docs/dhcp.md)).
-- **`config.img` overrides:** `grub.cfg` overrides inside an ISO's `config.img` are not applied with this boot method. The `config.img` itself (controller, certificates) is.
+- **`config.img` overrides:** `grub.cfg` overrides inside an ISO's `config.img` are not applied with this boot method: the installation options come from the boot menu. The rest of `config.img` (controller, certificates, network settings, for example from [EVE Imager](#device-configuration-with-eve-imager)) is.
+- **Device configuration:** network settings, WiFi, proxy and certificates cannot be set in the netboot installer itself (EVE-OS's installer reads no kernel arguments for them); they come with the ISO, see [Device configuration with EVE Imager](#device-configuration-with-eve-imager).
 - **arm64 testing:** the arm64 path is built and served but has had less hardware testing than amd64.
 - **ZEDEDA onboarding:**
   - only for EVE-OS 17.0.0-lts and later: older versions cannot report their hardware, and a node without a model would stay offline;

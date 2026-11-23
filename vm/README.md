@@ -607,6 +607,15 @@ a minute, for example controller-specific builds.
 The EVE-OS version and variant are read from the ISO itself; the file name
 does not matter. Deleting or replacing the file updates the menu.
 
+**Network settings, WiFi, proxy or certificates** for the machines: save the
+ISO with [EVE Imager](https://github.com/michiel-zededa/eve-imager)
+([download](https://github.com/michiel-zededa/eve-imager/releases/latest),
+2.1.0 or later), which
+puts them in the ISO's `config.img`, and copy it here. Leave *Installer
+defaults → Controller* empty then, or the boot menu replaces the controller
+set in EVE Imager. Details:
+[README: Device configuration with EVE Imager](../README.md#device-configuration-with-eve-imager).
+
 ---
 
 ## 8. Updates
