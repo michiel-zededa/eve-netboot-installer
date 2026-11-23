@@ -54,7 +54,6 @@ export default function Layout({ route, status, search, onSearch, onRefresh, ses
         <a className="brand" href="#/" aria-label="ZEDEDA">
           <span className="logo" />
         </a>
-        <div className="product">{PRODUCT}</div>
         <label className="search">
           <Search size={18} />
           <input

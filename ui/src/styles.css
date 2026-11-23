@@ -102,7 +102,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
   -webkit-mask: url("/ui/zededa-logo.svg") left center / contain no-repeat;
   mask: url("/ui/zededa-logo.svg") left center / contain no-repeat;
 }
-.product { font-weight: 500; white-space: nowrap; }
 .search {
   display: flex; align-items: center; gap: 10px;
   flex: 1; max-width: 780px; margin: 0 auto;
@@ -346,7 +345,7 @@ select {
   .nav-toggle { display: inline-flex; }
   .brand { width: auto; }
   .logo { width: 110px; height: 22px; }
-  .product, .search kbd { display: none; }
+  .search kbd { display: none; }
   .topbar { gap: 10px; padding: 0 12px; }
   .search { height: 40px; }
   .sidebar {
