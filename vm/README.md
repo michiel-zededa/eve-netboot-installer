@@ -775,7 +775,7 @@ cloud image, on every version tag ([image.yml](../.github/workflows/image.yml)).
 To build one locally (Linux with KVM, or macOS for the native architecture):
 
 ```bash
-vm/build/build.sh --arch amd64 --version 1.8.2
+vm/build/build.sh --arch amd64 --version 1.8.3
 ```
 
 | Path | Contents |
